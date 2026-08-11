@@ -3,7 +3,6 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from firebase_admin import auth
-from firebase_admin.exceptions import FirebaseError
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -36,25 +35,16 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # Firebase Admin raises different exception types for malformed,
+    # expired, revoked, and otherwise invalid ID tokens. Keep this boundary
+    # deliberately broad: no Firebase exception should escape as a 500.
     try:
         decoded_token = auth.verify_id_token(token)
-    except (
-        auth.InvalidIdTokenError,
-        auth.ExpiredIdTokenError,
-        auth.RevokedIdTokenError,
-        ValueError,
-    ) as exc:
+    except Exception as exc:
         logger.warning("Rejected Firebase ID token: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired authentication token.",
-            headers={"WWW-Authenticate": "Bearer"},
-        ) from None
-    except FirebaseError as exc:
-        logger.exception("Firebase token verification failed")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Firebase authentication is currently unavailable.",
             headers={"WWW-Authenticate": "Bearer"},
         ) from None
 
