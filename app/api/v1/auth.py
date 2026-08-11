@@ -3,9 +3,8 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from firebase_admin import auth
-from sqlalchemy.orm import Session
 
-from app.core.database import get_db
+from app.core.database import SessionLocal
 from app.core.firebase import initialize_firebase
 from app.schemas.user import UserResponse
 from app.services.auth_service import AuthService
@@ -24,7 +23,6 @@ initialize_firebase()
 )
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db),
 ):
     token = credentials.credentials.strip()
 
@@ -35,9 +33,8 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Firebase Admin raises different exception types for malformed,
-    # expired, revoked, and otherwise invalid ID tokens. Keep this boundary
-    # deliberately broad: no Firebase exception should escape as a 500.
+    # Verify Firebase before touching PostgreSQL. Invalid authentication
+    # must remain a 401 even when the database is unavailable.
     try:
         decoded_token = auth.verify_id_token(token)
     except Exception as exc:
@@ -65,31 +62,36 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    db = SessionLocal()
     try:
-        name = decoded_token.get("name")
-        service = AuthService(db)
-        user = service.get_or_create_user(
-            firebase_uid=firebase_uid,
-            email=email,
-            name=name,
+        try:
+            name = decoded_token.get("name")
+            service = AuthService(db)
+            user = service.get_or_create_user(
+                firebase_uid=firebase_uid,
+                email=email,
+                name=name,
+            )
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to load SpiceOS user: %s", email)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Unable to load the SpiceOS user profile.",
+            ) from None
+
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User account is inactive.",
+            )
+
+        logger.info(
+            "Authenticated SpiceOS user: %s (%s)",
+            user.email,
+            user.role,
         )
-    except Exception as exc:
-        logger.exception("Failed to load SpiceOS user: %s", email)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Unable to load the SpiceOS user profile.",
-        ) from None
 
-    if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is inactive.",
-        )
-
-    logger.info(
-        "Authenticated SpiceOS user: %s (%s)",
-        user.email,
-        user.role,
-    )
-
-    return user
+        return user
+    finally:
+        db.close()
