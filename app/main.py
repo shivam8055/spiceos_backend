@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.core.config import CORS_ALLOWED_ORIGINS
 from app.core.database import Base, engine
 from app.core.schema_migrations import ensure_order_columns
 from app.models.order import Order
@@ -24,7 +25,10 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"http://(localhost|127.0.0.1):\d+",
+    allow_origins=CORS_ALLOWED_ORIGINS,
+    # Keep localhost/127.0.0.1 available for development while production
+    # origins are explicitly configured through CORS_ALLOWED_ORIGINS.
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
