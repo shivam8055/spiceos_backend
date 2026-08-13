@@ -13,6 +13,14 @@ router = APIRouter()
 
 VALID_STATUSES = {"created", "preparing", "ready", "outForDelivery", "delivered", "cancelled"}
 VALID_PAYMENT_STATUSES = {"paid", "pending", "refunded"}
+STATUS_TRANSITIONS = {
+    "created": {"preparing", "cancelled"},
+    "preparing": {"ready", "cancelled"},
+    "ready": {"outForDelivery", "cancelled"},
+    "outForDelivery": {"delivered", "cancelled"},
+    "delivered": set(),
+    "cancelled": set(),
+}
 
 
 def _ensure_order_defaults(order: Order) -> None:
@@ -39,9 +47,19 @@ def get_orders(
     orders = db.query(Order).order_by(Order.created_at.desc(), Order.id.desc()).all()
     changed = False
     for order in orders:
-        before = (order.created_at, order.status, order.payment_status, order.order_source)
+        before = (
+            order.created_at,
+            order.status,
+            order.payment_status,
+            order.order_source,
+        )
         _ensure_order_defaults(order)
-        changed = changed or before != (order.created_at, order.status, order.payment_status, order.order_source)
+        changed = changed or before != (
+            order.created_at,
+            order.status,
+            order.payment_status,
+            order.order_source,
+        )
     if changed:
         db.commit()
     return [_serialize_order(order) for order in orders]
@@ -87,12 +105,23 @@ def update_order(
         raise HTTPException(status_code=404, detail="Order not found.")
 
     updates = order_update.model_dump(exclude_unset=True)
+
     if "status" in updates:
-        if updates["status"] not in VALID_STATUSES:
+        next_status = updates.pop("status")
+        if next_status not in VALID_STATUSES:
             raise HTTPException(status_code=422, detail="Invalid order status.")
-        order.status = updates.pop("status")
+        current_status = order.status or "created"
+        allowed_next = STATUS_TRANSITIONS.get(current_status, set())
+        if next_status != current_status and next_status not in allowed_next:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Invalid order status transition: {current_status} -> {next_status}.",
+            )
+        order.status = next_status
+
     if "payment_status" in updates:
-        if updates["payment_status"] not in VALID_PAYMENT_STATUSES:
+        payment_status = updates["payment_status"]
+        if payment_status not in VALID_PAYMENT_STATUSES:
             raise HTTPException(status_code=422, detail="Invalid payment status.")
 
     for field, value in updates.items():
