@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.database import Base, engine
+from app.core.schema_migrations import ensure_order_columns
 from app.models.order import Order
 from app.models.user import User
 from app.models.inventory_item import InventoryItem
@@ -12,6 +13,7 @@ from app.api.v1.auth import router as auth_router
 from app.api.v1.inventory import router as inventory_router
 
 Base.metadata.create_all(bind=engine)
+ensure_order_columns(engine)
 
 
 app = FastAPI(
@@ -27,7 +29,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 app.include_router(
     orders_router,
