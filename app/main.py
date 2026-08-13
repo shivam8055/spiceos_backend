@@ -8,6 +8,8 @@ from app.models.user import User
 from app.api.v1.orders import router as orders_router
 from app.api.v1.auth import router as auth_router
 
+from app.models.inventory_item import InventoryItem
+from app.api.v1.inventory import router as inventory_router
 
 Base.metadata.create_all(bind=engine)
 
@@ -33,6 +35,11 @@ app.include_router(
     tags=["Orders"],
 )
 
+app.include_router(
+    inventory_router,
+    prefix="/inventory",
+    tags=["Inventory"],
+)
 
 app.include_router(
     auth_router,
