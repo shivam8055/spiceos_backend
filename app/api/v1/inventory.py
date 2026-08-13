@@ -68,6 +68,16 @@ def create_inventory_item(
 
     db.add(item)
     try:
+        db.flush()
+        if payload.quantity > 0:
+            db.add(
+                InventoryMovement(
+                    inventory_item_id=item.id,
+                    quantity_delta=payload.quantity,
+                    reason="Opening stock",
+                    created_by_user_id=current_user.id,
+                )
+            )
         db.commit()
         db.refresh(item)
     except IntegrityError as exc:
