@@ -14,7 +14,6 @@ class InventoryItemCreate(BaseModel):
 
 class InventoryItemResponse(InventoryItemCreate):
     model_config = ConfigDict(from_attributes=True)
-
     id: int
     is_active: bool
 
@@ -26,10 +25,21 @@ class InventoryAdjustment(BaseModel):
 
 class InventoryMovementResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-
     id: int
     inventory_item_id: int
     quantity_delta: float
     reason: str
     created_by_user_id: int
     created_at: datetime
+
+
+class InventoryReorderRecommendation(BaseModel):
+    item_id: int
+    name: str
+    sku: str | None
+    unit: str
+    current_quantity: float
+    reorder_level: float
+    recommended_quantity: float
+    estimated_cost: float
+    urgency: str
