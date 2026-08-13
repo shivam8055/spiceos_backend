@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -30,4 +32,4 @@ class InventoryMovementResponse(BaseModel):
     quantity_delta: float
     reason: str
     created_by_user_id: int
-    created_at: object
+    created_at: datetime
