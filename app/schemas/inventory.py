@@ -20,3 +20,14 @@ class InventoryItemResponse(InventoryItemCreate):
 class InventoryAdjustment(BaseModel):
     quantity_delta: float
     reason: str = Field(min_length=1, max_length=255)
+
+
+class InventoryMovementResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    inventory_item_id: int
+    quantity_delta: float
+    reason: str
+    created_by_user_id: int
+    created_at: object
