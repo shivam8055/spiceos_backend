@@ -20,3 +20,13 @@ CORS_ALLOWED_ORIGINS = [
     ).split(",")
     if origin.strip()
 ]
+
+PUBLIC_QR_BASE_URL = os.getenv(
+    "PUBLIC_QR_BASE_URL",
+    "https://app.spiceos.co.in/order",
+)
+
+QR_PUBLIC_TOKEN_SECRET = os.getenv("QR_PUBLIC_TOKEN_SECRET")
+if not QR_PUBLIC_TOKEN_SECRET:
+    # Development fallback only. Production deployments must provide a stable secret.
+    QR_PUBLIC_TOKEN_SECRET = "spiceos-dev-qr-token-secret"
