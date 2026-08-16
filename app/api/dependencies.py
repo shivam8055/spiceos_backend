@@ -4,8 +4,9 @@ from collections.abc import Callable
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from firebase_admin import auth
+from sqlalchemy.orm import Session
 
-from app.core.database import SessionLocal
+from app.core.database import get_db
 from app.core.firebase import initialize_firebase
 from app.models.user import User
 from app.services.auth_service import AuthService
@@ -16,6 +17,7 @@ security = HTTPBearer(auto_error=True)
 
 def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
 ) -> User:
     token = credentials.credentials.strip()
     if not token:
@@ -52,32 +54,28 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    db = SessionLocal()
     try:
-        try:
-            service = AuthService(db)
-            user = service.get_or_create_user(
-                firebase_uid=firebase_uid,
-                email=email,
-                name=decoded_token.get("name"),
-            )
-        except Exception:
-            db.rollback()
-            logger.exception("Failed to load SpiceOS user: %s", email)
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Unable to load the SpiceOS user profile.",
-            ) from None
+        service = AuthService(db)
+        user = service.get_or_create_user(
+            firebase_uid=firebase_uid,
+            email=email,
+            name=decoded_token.get("name"),
+        )
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to load SpiceOS user: %s", email)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to load the SpiceOS user profile.",
+        ) from None
 
-        if not user.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="User account is inactive.",
-            )
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is inactive.",
+        )
 
-        return user
-    finally:
-        db.close()
+    return user
 
 
 def require_roles(*allowed_roles: str) -> Callable:
@@ -89,6 +87,7 @@ def require_roles(*allowed_roles: str) -> Callable:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You do not have permission to access this resource.",
             )
+
         return current_user
 
     return role_dependency
