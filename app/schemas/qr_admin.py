@@ -3,6 +3,18 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
+class RestaurantCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    logo_url: str | None = Field(default=None, max_length=1000)
+
+
+class RestaurantResponse(BaseModel):
+    restaurant_id: str
+    name: str
+    logo_url: str | None
+    active: bool
+
+
 class QRTableCreateRequest(BaseModel):
     restaurant_id: str = Field(min_length=1, max_length=100)
     branch_id: str = Field(min_length=1, max_length=100)
