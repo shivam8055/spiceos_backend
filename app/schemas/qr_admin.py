@@ -35,6 +35,18 @@ class QRTableCreateResponse(BaseModel):
     qr_url: str
 
 
+class QRTableListResponse(BaseModel):
+    id: int
+    restaurant_id: str
+    branch_id: str
+    table_id: str
+    table_name: str
+    session_id: str
+    active: bool
+    expires_at: datetime | None
+    qr_url: str | None = None
+
+
 class MenuModifierInput(BaseModel):
     id: str = Field(min_length=1, max_length=100)
     name: str = Field(min_length=1, max_length=100)
@@ -51,6 +63,18 @@ class MenuItemCreateRequest(BaseModel):
     price: float = Field(ge=0)
     available: bool = True
     modifiers: list[MenuModifierInput] = Field(default_factory=list, max_length=50)
+
+
+class MenuItemResponse(BaseModel):
+    id: int
+    restaurant_id: str
+    branch_id: str
+    category: str
+    name: str
+    description: str | None
+    price: float
+    available: bool
+    modifiers: list[MenuModifierInput] = Field(default_factory=list)
 
 
 class MenuItemCreateResponse(BaseModel):
