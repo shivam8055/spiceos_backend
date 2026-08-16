@@ -12,7 +12,8 @@ class FakeUser:
 
 class AuthorizationDependencyTests(unittest.TestCase):
     def test_owner_allows_owner(self):
-        self.assertEqual(require_owner(FakeUser("owner")), FakeUser("owner"))
+        user = FakeUser("owner")
+        self.assertIs(require_owner(user), user)
 
     def test_owner_rejects_manager_with_403(self):
         with self.assertRaises(HTTPException) as context:
