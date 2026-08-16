@@ -10,7 +10,7 @@ from app.models.order import Order
 from app.models.order_item import OrderItem
 from app.models.qr_table import QRTable
 from app.schemas.qr_ordering import QROrderCreateRequest, QROrderItemRequest
-from app.services.qr_ordering import create_qr_order, hash_token, menu_response, resolve_qr_table
+from app.services.qr_ordering import create_qr_order, get_public_order_status, hash_token, resolve_qr_table
 
 
 def make_db():
@@ -31,18 +31,16 @@ def seed_table(db):
         expires_at=datetime.utcnow() + timedelta(hours=1),
     )
     db.add(table)
-    db.add(
-        MenuItem(
-            restaurant_id="restaurant-1",
-            branch_id="branch-1",
-            category="Mains",
-            name="Paneer Tikka",
-            description="Test item",
-            price=250,
-            available=True,
-            modifiers_json='[{"id":"extra-cheese","name":"Extra Cheese","price_delta":40,"available":true}]',
-        )
-    )
+    db.add(MenuItem(
+        restaurant_id="restaurant-1",
+        branch_id="branch-1",
+        category="Mains",
+        name="Paneer Tikka",
+        description="Test item",
+        price=250,
+        available=True,
+        modifiers_json='[{"id":"extra-cheese","name":"Extra Cheese","price_delta":40,"available":true}]',
+    ))
     db.commit()
     db.refresh(table)
     return table
@@ -61,9 +59,7 @@ def test_invalid_qr_token_is_rejected():
 def test_server_calculates_price_and_ignores_client_price():
     db = make_db()
     table = seed_table(db)
-    payload = QROrderCreateRequest(
-        items=[QROrderItemRequest(menu_item_id=1, quantity=2, modifier_ids=["extra-cheese"])]
-    )
+    payload = QROrderCreateRequest(items=[QROrderItemRequest(menu_item_id=1, quantity=2, modifier_ids=["extra-cheese"])])
     response = create_qr_order(db, table, payload, "idempotency-1")
     assert response.total == 580
     order = db.query(Order).filter(Order.id == response.order_id).one()
@@ -83,9 +79,35 @@ def test_duplicate_submit_returns_same_order():
     assert db.query(Order).count() == 1
 
 
-def test_expired_qr_is_rejected():
+def test_unavailable_item_is_rejected():
     db = make_db()
     table = seed_table(db)
+    item = db.query(MenuItem).one()
+    item.available = False
+    db.commit()
+    payload = QROrderCreateRequest(items=[QROrderItemRequest(menu_item_id=item.id, quantity=1)])
+    try:
+        create_qr_order(db, table, payload, "unavailable-key")
+        assert False, "unavailable item must be rejected"
+    except HTTPException as exc:
+        assert exc.status_code == 409
+
+
+def test_public_status_is_customer_safe():
+    db = make_db()
+    table = seed_table(db)
+    payload = QROrderCreateRequest(items=[QROrderItemRequest(menu_item_id=1, quantity=1)])
+    created = create_qr_order(db, table, payload, "status-key")
+    status_response = get_public_order_status(db, created.public_order_token)
+    assert status_response.order_number == created.order_number
+    assert status_response.status == "created"
+    assert status_response.total == 250
+
+
+def test_expired_qr_is_rejected():
+    db = make_db()
+    seed_table(db)
+    table = db.query(QRTable).one()
     table.expires_at = datetime.utcnow() - timedelta(minutes=1)
     db.commit()
     try:
