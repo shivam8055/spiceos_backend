@@ -1,0 +1,95 @@
+from datetime import datetime, timedelta
+
+from fastapi import HTTPException
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+
+from app.core.database import Base
+from app.models.menu_item import MenuItem
+from app.models.order import Order
+from app.models.order_item import OrderItem
+from app.models.qr_table import QRTable
+from app.schemas.qr_ordering import QROrderCreateRequest, QROrderItemRequest
+from app.services.qr_ordering import create_qr_order, hash_token, menu_response, resolve_qr_table
+
+
+def make_db():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(bind=engine)
+    return sessionmaker(bind=engine)()
+
+
+def seed_table(db):
+    table = QRTable(
+        restaurant_id="restaurant-1",
+        branch_id="branch-1",
+        table_id="table-1",
+        table_name="Table 1",
+        session_id="session-1",
+        token_hash=hash_token("valid-qr-token-1234567890"),
+        active=True,
+        expires_at=datetime.utcnow() + timedelta(hours=1),
+    )
+    db.add(table)
+    db.add(
+        MenuItem(
+            restaurant_id="restaurant-1",
+            branch_id="branch-1",
+            category="Mains",
+            name="Paneer Tikka",
+            description="Test item",
+            price=250,
+            available=True,
+            modifiers_json='[{"id":"extra-cheese","name":"Extra Cheese","price_delta":40,"available":true}]',
+        )
+    )
+    db.commit()
+    db.refresh(table)
+    return table
+
+
+def test_invalid_qr_token_is_rejected():
+    db = make_db()
+    seed_table(db)
+    try:
+        resolve_qr_table(db, "invalid-token-1234567890")
+        assert False, "invalid QR token must be rejected"
+    except HTTPException as exc:
+        assert exc.status_code == 404
+
+
+def test_server_calculates_price_and_ignores_client_price():
+    db = make_db()
+    table = seed_table(db)
+    payload = QROrderCreateRequest(
+        items=[QROrderItemRequest(menu_item_id=1, quantity=2, modifier_ids=["extra-cheese"])]
+    )
+    response = create_qr_order(db, table, payload, "idempotency-1")
+    assert response.total == 580
+    order = db.query(Order).filter(Order.id == response.order_id).one()
+    assert order.order_source == "qr_table"
+    assert db.query(OrderItem).filter(OrderItem.order_id == order.id).one().unit_price == 290
+
+
+def test_duplicate_submit_returns_same_order():
+    db = make_db()
+    table = seed_table(db)
+    payload = QROrderCreateRequest(items=[QROrderItemRequest(menu_item_id=1, quantity=1)])
+    first = create_qr_order(db, table, payload, "same-key")
+    second = create_qr_order(db, table, payload, "same-key")
+    assert second.order_id == first.order_id
+    assert second.order_number == first.order_number
+    assert second.public_order_token == first.public_order_token
+    assert db.query(Order).count() == 1
+
+
+def test_expired_qr_is_rejected():
+    db = make_db()
+    table = seed_table(db)
+    table.expires_at = datetime.utcnow() - timedelta(minutes=1)
+    db.commit()
+    try:
+        resolve_qr_table(db, "valid-qr-token-1234567890")
+        assert False, "expired QR must be rejected"
+    except HTTPException as exc:
+        assert exc.status_code == 404
