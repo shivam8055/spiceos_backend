@@ -56,3 +56,31 @@ def test_cross_restaurant_resource_is_rejected():
     with pytest.raises(HTTPException) as exc:
         _validate_tenant_payload("other-restaurant", restaurant)
     assert exc.value.status_code == 403
+
+def test_create_restaurant_persists_user_association():
+    db = make_db()
+    user = User(
+        firebase_uid="uid-3",
+        email="chef@example.com",
+        role="owner",
+        restaurant_id=None,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    # Detach user to simulate different DB session lifecycle from auth dependency
+    db.expunge(user)
+
+    from app.schemas.qr_admin import RestaurantCreateRequest
+    from app.api.v1.qr_ordering import create_restaurant
+
+    payload = RestaurantCreateRequest(name="Spice Box")
+    response = create_restaurant(payload=payload, db=db, current_user=user)
+
+    assert response.name == "Spice Box"
+    assert response.restaurant_id.startswith("spice-box-")
+
+    # Verify user in database now has restaurant_id persisted
+    persisted_user = db.query(User).filter(User.firebase_uid == "uid-3").first()
+    assert persisted_user.restaurant_id == response.restaurant_id
