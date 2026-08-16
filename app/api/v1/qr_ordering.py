@@ -3,7 +3,7 @@ import re
 import secrets
 import uuid
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import require_staff
@@ -12,6 +12,7 @@ from app.models.menu_item import MenuItem
 from app.models.qr_table import QRTable
 from app.models.restaurant import Restaurant
 from app.models.user import User
+from app.schemas.menu_import import MenuImportConfirmRequest, MenuImportConfirmResponse, MenuImportPreviewResponse
 from app.schemas.qr_admin import (
     MenuItemCreateRequest,
     MenuItemCreateResponse,
@@ -23,6 +24,7 @@ from app.schemas.qr_admin import (
     RestaurantResponse,
 )
 from app.schemas.qr_ordering import QROrderCreateRequest, QROrderCreateResponse, QRMenuResponse, QROrderStatusResponse
+from app.services.menu_import import MenuImportError, extract_menu_from_image
 from app.services.qr_ordering import create_qr_order, get_public_order_status, hash_token, menu_response, qr_url, resolve_qr_table
 
 router = APIRouter()
@@ -95,6 +97,41 @@ def list_menu_items(restaurant_id: str, branch_id: str, db: Session = Depends(ge
     return result
 
 
+@router.post("/admin/menu-import/preview", response_model=MenuImportPreviewResponse)
+async def preview_menu_import(
+    restaurant_id: str = Form(...),
+    branch_id: str = Form(...),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_staff),
+):
+    restaurant = _require_restaurant(current_user, db)
+    _validate_tenant_payload(restaurant_id, restaurant)
+    try:
+        content = await file.read()
+        items, warnings = await extract_menu_from_image(content, file.content_type or "")
+    except MenuImportError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    return MenuImportPreviewResponse(restaurant_id=restaurant.restaurant_id, branch_id=branch_id.strip(), items=items, warnings=warnings)
+
+
+@router.post("/admin/menu-import/confirm", response_model=MenuImportConfirmResponse)
+def confirm_menu_import(payload: MenuImportConfirmRequest, db: Session = Depends(get_db), current_user: User = Depends(require_staff)):
+    restaurant = _require_restaurant(current_user, db)
+    _validate_tenant_payload(payload.restaurant_id, restaurant)
+    created = 0
+    skipped = 0
+    for imported in payload.items:
+        existing = db.query(MenuItem).filter(MenuItem.restaurant_id == restaurant.restaurant_id, MenuItem.branch_id == payload.branch_id.strip(), MenuItem.name == imported.name.strip()).first()
+        if existing:
+            skipped += 1
+            continue
+        db.add(MenuItem(restaurant_id=restaurant.restaurant_id, branch_id=payload.branch_id.strip(), category=imported.category.strip(), name=imported.name.strip(), description=imported.description, price=imported.price, available=imported.available, modifiers_json="[]"))
+        created += 1
+    db.commit()
+    return MenuImportConfirmResponse(created_count=created, skipped_count=skipped)
+
+
 @router.get("/admin/qr-tables", response_model=list[QRTableListResponse])
 def list_qr_tables(branch_id: str | None = None, db: Session = Depends(get_db), current_user: User = Depends(require_staff)):
     restaurant = _require_restaurant(current_user, db)
@@ -111,12 +148,9 @@ def create_qr_table(payload: QRTableCreateRequest, db: Session = Depends(get_db)
     _validate_tenant_payload(payload.restaurant_id, restaurant)
     branch_id, table_id = payload.branch_id.strip(), payload.table_id.strip()
     table_name, session_id = payload.table_name.strip(), payload.session_id.strip()
-
-    # Re-generating a QR for the same physical table/session invalidates the previous token.
     existing = db.query(QRTable).filter(QRTable.restaurant_id == restaurant.restaurant_id, QRTable.branch_id == branch_id, QRTable.table_id == table_id, QRTable.session_id == session_id, QRTable.active.is_(True)).all()
     for old_table in existing:
         old_table.active = False
-
     raw_token = secrets.token_urlsafe(32)
     table = QRTable(restaurant_id=restaurant.restaurant_id, branch_id=branch_id, table_id=table_id, table_name=table_name, session_id=session_id, token_hash=hash_token(raw_token), active=True, expires_at=payload.expires_at)
     db.add(table)
