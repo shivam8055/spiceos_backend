@@ -1,13 +1,14 @@
+import base64
 import hashlib
+import hmac
 import json
-import secrets
 from datetime import datetime
 from uuid import uuid4
 
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.core.config import PUBLIC_QR_BASE_URL
+from app.core.config import PUBLIC_QR_BASE_URL, QR_PUBLIC_TOKEN_SECRET
 from app.models.menu_item import MenuItem
 from app.models.order import Order
 from app.models.order_item import OrderItem
@@ -15,11 +16,11 @@ from app.models.qr_table import QRTable
 from app.schemas.qr_ordering import (
     QROrderCreateRequest,
     QROrderCreateResponse,
+    QROrderStatusResponse,
+    QRContextResponse,
     QRMenuItemResponse,
     QRMenuResponse,
     QRModifierResponse,
-    QRContextResponse,
-    QROrderStatusResponse,
 )
 
 
@@ -27,10 +28,15 @@ def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def public_order_token(table: QRTable, idempotency_key: str) -> str:
+    message = f"{table.id}:{table.token_hash}:{idempotency_key}".encode("utf-8")
+    digest = hmac.new(QR_PUBLIC_TOKEN_SECRET.encode("utf-8"), message, hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+
+
 def resolve_qr_table(db: Session, token: str) -> QRTable:
     if not token or len(token) < 20:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="QR code is invalid or expired.")
-
     table = db.query(QRTable).filter(QRTable.token_hash == hash_token(token)).first()
     now = datetime.utcnow()
     if table is None or not table.active or (table.expires_at is not None and table.expires_at <= now):
@@ -49,10 +55,7 @@ def parse_modifiers(item: MenuItem) -> list[dict]:
 def menu_response(db: Session, table: QRTable) -> QRMenuResponse:
     items = (
         db.query(MenuItem)
-        .filter(
-            MenuItem.restaurant_id == table.restaurant_id,
-            MenuItem.branch_id == table.branch_id,
-        )
+        .filter(MenuItem.restaurant_id == table.restaurant_id, MenuItem.branch_id == table.branch_id)
         .order_by(MenuItem.category.asc(), MenuItem.name.asc())
         .all()
     )
@@ -79,7 +82,6 @@ def menu_response(db: Session, table: QRTable) -> QRMenuResponse:
                 modifiers=modifiers,
             )
         )
-
     return QRMenuResponse(
         context=QRContextResponse(
             restaurant_id=table.restaurant_id,
@@ -102,8 +104,6 @@ def create_qr_order(db: Session, table: QRTable, payload: QROrderCreateRequest, 
     if existing is not None:
         if existing.qr_table_id != table.id:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Idempotency key was already used for another table.")
-        if not existing.public_token_hash:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Existing order cannot be replayed safely.")
         return QROrderCreateResponse(
             order_id=existing.id,
             order_number=existing.order_number,
@@ -111,7 +111,7 @@ def create_qr_order(db: Session, table: QRTable, payload: QROrderCreateRequest, 
             total=float(existing.total),
             currency="INR",
             table_name=table.table_name,
-            public_order_token="",
+            public_order_token=public_order_token(table, key),
         )
 
     menu_ids = {line.menu_item_id for line in payload.items}
@@ -134,7 +134,6 @@ def create_qr_order(db: Session, table: QRTable, payload: QROrderCreateRequest, 
         item = by_id[line.menu_item_id]
         if not item.available:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"{item.name} is currently unavailable.")
-
         modifiers_by_id = {str(m.get("id")): m for m in parse_modifiers(item)}
         selected_modifiers = []
         modifier_delta = 0.0
@@ -145,19 +144,18 @@ def create_qr_order(db: Session, table: QRTable, payload: QROrderCreateRequest, 
             delta = float(modifier.get("price_delta", 0))
             modifier_delta += delta
             selected_modifiers.append({"id": str(modifier_id), "name": str(modifier.get("name", "")), "price_delta": delta})
-
         unit_price = float(item.price) + modifier_delta
         line_total = unit_price * line.quantity
         calculated_total += line_total
         snapshots.append({"item": item, "quantity": line.quantity, "unit_price": unit_price, "line_total": line_total, "modifiers": selected_modifiers, "note": line.note})
 
-    public_token = secrets.token_urlsafe(32)
+    public_token = public_order_token(table, key)
     order = Order(
         order_number=f"QR-{uuid4().hex[:12].upper()}",
         customer_id=None,
         customer_name=(payload.customer_name or "QR Guest").strip() or "QR Guest",
-        customer_phone=(payload.customer_phone or None),
-        primary_item=snapshots[0]["item"].name if snapshots else None,
+        customer_phone=payload.customer_phone or None,
+        primary_item=snapshots[0]["item"].name,
         total=round(calculated_total, 2),
         status="created",
         payment_status="pending",
@@ -170,7 +168,6 @@ def create_qr_order(db: Session, table: QRTable, payload: QROrderCreateRequest, 
     )
     db.add(order)
     db.flush()
-
     for snapshot in snapshots:
         db.add(
             OrderItem(
@@ -184,7 +181,6 @@ def create_qr_order(db: Session, table: QRTable, payload: QROrderCreateRequest, 
                 note=snapshot["note"],
             )
         )
-
     db.commit()
     db.refresh(order)
     return QROrderCreateResponse(
