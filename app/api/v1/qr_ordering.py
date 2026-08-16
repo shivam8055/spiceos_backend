@@ -64,25 +64,42 @@ def public_order_status(public_token: str, db: Session = Depends(get_db)):
 
 @router.post("/admin/restaurant", response_model=RestaurantResponse, status_code=status.HTTP_201_CREATED)
 def create_restaurant(payload: RestaurantCreateRequest, db: Session = Depends(get_db), current_user: User = Depends(require_staff)):
-    # get_current_user returns a detached User because its dependency owns and
-    # closes its Session. Re-query the user in this request's Session before
-    # changing restaurant_id; mutating the detached object does not persist.
-    managed_user = db.query(User).filter(User.id == current_user.id).first()
-    if managed_user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authenticated user profile no longer exists.")
-    if managed_user.restaurant_id:
+    if current_user.restaurant_id:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User is already associated with a restaurant.")
 
-    slug = re.sub(r"[^a-z0-9]+", "-", payload.name.lower()).strip("-") or "restaurant"
+    name = payload.name.strip()
+
+    # Recover a restaurant created before the auth-session fix. The previous
+    # implementation could create the restaurant but fail to persist the
+    # user's restaurant_id. For the owner bootstrap flow, reclaim an active
+    # restaurant with the exact same name instead of creating a duplicate.
+    if current_user.role == "owner":
+        existing = (
+            db.query(Restaurant)
+            .filter(Restaurant.name == name, Restaurant.active.is_(True))
+            .first()
+        )
+        if existing is not None:
+            current_user.restaurant_id = existing.restaurant_id
+            db.commit()
+            db.refresh(existing)
+            return RestaurantResponse(
+                restaurant_id=existing.restaurant_id,
+                name=existing.name,
+                logo_url=existing.logo_url,
+                active=existing.active,
+            )
+
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "restaurant"
     restaurant_id = f"{slug}-{uuid.uuid4().hex[:8]}"
     restaurant = Restaurant(
         restaurant_id=restaurant_id,
-        name=payload.name.strip(),
+        name=name,
         logo_url=payload.logo_url.strip() if payload.logo_url else None,
         active=True,
     )
     db.add(restaurant)
-    managed_user.restaurant_id = restaurant_id
+    current_user.restaurant_id = restaurant_id
     db.commit()
     db.refresh(restaurant)
     return RestaurantResponse(restaurant_id=restaurant.restaurant_id, name=restaurant.name, logo_url=restaurant.logo_url, active=restaurant.active)
