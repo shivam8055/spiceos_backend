@@ -68,6 +68,11 @@ def create_restaurant(payload: RestaurantCreateRequest, db: Session = Depends(ge
     restaurant_id = f"{slug}-{uuid.uuid4().hex[:8]}"
     restaurant = Restaurant(restaurant_id=restaurant_id, name=payload.name.strip(), logo_url=payload.logo_url.strip() if payload.logo_url else None, active=True)
     db.add(restaurant)
+    db_user = db.query(User).filter(User.id == current_user.id).first() if getattr(current_user, "id", None) else None
+    if not db_user and getattr(current_user, "firebase_uid", None):
+        db_user = db.query(User).filter(User.firebase_uid == current_user.firebase_uid).first()
+    if db_user:
+        db_user.restaurant_id = restaurant_id
     current_user.restaurant_id = restaurant_id
     db.commit()
     db.refresh(restaurant)
