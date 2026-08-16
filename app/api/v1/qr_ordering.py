@@ -30,10 +30,43 @@ from app.services.qr_ordering import create_qr_order, get_public_order_status, h
 router = APIRouter()
 
 
+def _managed_user(current_user: User, db: Session) -> User:
+    user = db.query(User).filter(User.id == current_user.id).first()
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authenticated user profile no longer exists.")
+    return user
+
+
 def _require_restaurant(current_user: User, db: Session) -> Restaurant:
-    if not current_user.restaurant_id:
+    # get_current_user owns/closes a different DB session. Always use the
+    # request session for tenant reads and writes.
+    managed_user = _managed_user(current_user, db)
+    restaurant_id = managed_user.restaurant_id
+
+    # Recover the orphan restaurant produced by the old detached-user bug.
+    # Only the owner may auto-claim, and only when exactly one active restaurant
+    # is currently unclaimed. This prevents cross-tenant guessing.
+    if not restaurant_id and managed_user.role == "owner":
+        claimed_ids = db.query(User.restaurant_id).filter(User.restaurant_id.isnot(None)).subquery()
+        candidates = (
+            db.query(Restaurant)
+            .filter(Restaurant.active.is_(True), ~Restaurant.restaurant_id.in_(claimed_ids))
+            .order_by(Restaurant.created_at.desc())
+            .all()
+        )
+        if len(candidates) == 1:
+            managed_user.restaurant_id = candidates[0].restaurant_id
+            db.commit()
+            db.refresh(managed_user)
+            restaurant_id = managed_user.restaurant_id
+
+    if not restaurant_id:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User is not associated with a restaurant. Create or join a restaurant first.")
-    restaurant = db.query(Restaurant).filter(Restaurant.restaurant_id == current_user.restaurant_id, Restaurant.active.is_(True)).first()
+
+    restaurant = db.query(Restaurant).filter(
+        Restaurant.restaurant_id == restaurant_id,
+        Restaurant.active.is_(True),
+    ).first()
     if restaurant is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Restaurant access is inactive or invalid.")
     return restaurant
@@ -64,31 +97,21 @@ def public_order_status(public_token: str, db: Session = Depends(get_db)):
 
 @router.post("/admin/restaurant", response_model=RestaurantResponse, status_code=status.HTTP_201_CREATED)
 def create_restaurant(payload: RestaurantCreateRequest, db: Session = Depends(get_db), current_user: User = Depends(require_staff)):
-    if current_user.restaurant_id:
+    managed_user = _managed_user(current_user, db)
+    if managed_user.restaurant_id:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User is already associated with a restaurant.")
 
     name = payload.name.strip()
 
-    # Recover a restaurant created before the auth-session fix. The previous
-    # implementation could create the restaurant but fail to persist the
-    # user's restaurant_id. For the owner bootstrap flow, reclaim an active
-    # restaurant with the exact same name instead of creating a duplicate.
-    if current_user.role == "owner":
-        existing = (
-            db.query(Restaurant)
-            .filter(Restaurant.name == name, Restaurant.active.is_(True))
-            .first()
-        )
+    # Recover a restaurant created before the auth-session fix. Re-query and
+    # mutate the managed user so the association is actually committed.
+    if managed_user.role == "owner":
+        existing = db.query(Restaurant).filter(Restaurant.name == name, Restaurant.active.is_(True)).first()
         if existing is not None:
-            current_user.restaurant_id = existing.restaurant_id
+            managed_user.restaurant_id = existing.restaurant_id
             db.commit()
             db.refresh(existing)
-            return RestaurantResponse(
-                restaurant_id=existing.restaurant_id,
-                name=existing.name,
-                logo_url=existing.logo_url,
-                active=existing.active,
-            )
+            return RestaurantResponse(restaurant_id=existing.restaurant_id, name=existing.name, logo_url=existing.logo_url, active=existing.active)
 
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "restaurant"
     restaurant_id = f"{slug}-{uuid.uuid4().hex[:8]}"
@@ -99,7 +122,7 @@ def create_restaurant(payload: RestaurantCreateRequest, db: Session = Depends(ge
         active=True,
     )
     db.add(restaurant)
-    current_user.restaurant_id = restaurant_id
+    managed_user.restaurant_id = restaurant_id
     db.commit()
     db.refresh(restaurant)
     return RestaurantResponse(restaurant_id=restaurant.restaurant_id, name=restaurant.name, logo_url=restaurant.logo_url, active=restaurant.active)
