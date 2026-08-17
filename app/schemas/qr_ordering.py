@@ -58,6 +58,7 @@ class QROrderCreateResponse(BaseModel):
 class QROrderStatusResponse(BaseModel):
     order_number: str
     status: str
+    payment_status: str
     total: float
     currency: str
     table_name: str
