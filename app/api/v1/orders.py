@@ -3,7 +3,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import require_staff
+from app.api.dependencies import require_manager, require_staff
 from app.core.database import get_db
 from app.models.order import Order
 from app.models.restaurant import Restaurant
@@ -14,6 +14,12 @@ router = APIRouter()
 
 VALID_STATUSES = {"created", "preparing", "ready", "outForDelivery", "delivered", "cancelled"}
 VALID_PAYMENT_STATUSES = {"paid", "pending", "refunded"}
+INITIAL_PAYMENT_STATUSES = {"paid", "pending"}
+PAYMENT_TRANSITIONS = {
+    "pending": {"paid"},
+    "paid": {"refunded"},
+    "refunded": set(),
+}
 STATUS_TRANSITIONS = {
     "created": {"preparing", "cancelled"},
     "preparing": {"ready", "cancelled"},
@@ -103,8 +109,10 @@ def create_order(
     restaurant = _require_restaurant(current_user, db)
     if db.query(Order).filter(Order.order_number == order.order_number).first():
         raise HTTPException(status_code=409, detail="Order number already exists.")
-    if order.payment_status not in VALID_PAYMENT_STATUSES:
-        raise HTTPException(status_code=422, detail="Invalid payment status.")
+    if order.payment_status not in INITIAL_PAYMENT_STATUSES:
+        raise HTTPException(status_code=422, detail="New orders may only be pending or paid.")
+    if order.payment_status == "paid" and current_user.role not in {"manager", "owner"}:
+        raise HTTPException(status_code=403, detail="Only a manager or owner can mark a new order as paid.")
 
     new_order = Order(
         order_number=order.order_number,
@@ -159,9 +167,34 @@ def update_order(
         order.status = next_status
 
     if "payment_status" in updates:
-        payment_status = updates["payment_status"]
-        if payment_status not in VALID_PAYMENT_STATUSES:
+        next_payment_status = updates.pop("payment_status")
+        if next_payment_status not in VALID_PAYMENT_STATUSES:
             raise HTTPException(status_code=422, detail="Invalid payment status.")
+        current_payment_status = order.payment_status or "pending"
+        if next_payment_status != current_payment_status:
+            if current_user.role not in {"manager", "owner"}:
+                raise HTTPException(status_code=403, detail="Only a manager or owner can change payment status.")
+            allowed_next = PAYMENT_TRANSITIONS.get(current_payment_status, set())
+            if next_payment_status not in allowed_next:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Invalid payment status transition: {current_payment_status} -> {next_payment_status}.",
+                )
+        order.payment_status = next_payment_status
+
+    if "total" in updates:
+        next_total = updates.pop("total")
+        if next_total != order.total:
+            if order.order_source == "qr_table":
+                raise HTTPException(status_code=409, detail="QR order totals are server-authoritative and cannot be changed.")
+            if current_user.role not in {"manager", "owner"}:
+                raise HTTPException(status_code=403, detail="Only a manager or owner can change order totals.")
+        order.total = next_total
+
+    if "order_source" in updates:
+        next_source = updates.pop("order_source")
+        if next_source != order.order_source:
+            raise HTTPException(status_code=409, detail="Order source is immutable.")
 
     for field, value in updates.items():
         setattr(order, field, value)
