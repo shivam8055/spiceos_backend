@@ -3,16 +3,18 @@ import re
 import secrets
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import require_staff
 from app.core.database import get_db
 from app.models.menu_item import MenuItem
+from app.models.order import Order
 from app.models.qr_table import QRTable
 from app.models.restaurant import Restaurant
 from app.models.user import User
 from app.schemas.menu_import import MenuImportConfirmRequest, MenuImportConfirmResponse, MenuImportPreviewResponse
+from app.schemas.payment import QRPaymentCreateResponse, QRPaymentStatusResponse, QRPaymentVerifyRequest
 from app.schemas.qr_admin import (
     MenuItemCreateRequest,
     MenuItemCreateResponse,
@@ -25,6 +27,7 @@ from app.schemas.qr_admin import (
 )
 from app.schemas.qr_ordering import QROrderCreateRequest, QROrderCreateResponse, QRMenuResponse, QROrderStatusResponse
 from app.services.menu_import import MenuImportError, extract_menu_from_image
+from app.services.payment_service import create_qr_payment, process_webhook, verify_checkout_signature
 from app.services.qr_ordering import create_qr_order, get_public_order_status, hash_token, menu_response, qr_url, resolve_qr_table
 
 router = APIRouter()
@@ -38,14 +41,8 @@ def _managed_user(current_user: User, db: Session) -> User:
 
 
 def _require_restaurant(current_user: User, db: Session) -> Restaurant:
-    # get_current_user owns/closes a different DB session. Always use the
-    # request session for tenant reads and writes.
     managed_user = _managed_user(current_user, db)
     restaurant_id = managed_user.restaurant_id
-
-    # Recover the orphan restaurant produced by the old detached-user bug.
-    # Only the owner may auto-claim, and only when exactly one active restaurant
-    # is currently unclaimed. This prevents cross-tenant guessing.
     if not restaurant_id and managed_user.role == "owner":
         claimed_ids = db.query(User.restaurant_id).filter(User.restaurant_id.isnot(None)).subquery()
         candidates = (
@@ -95,16 +92,52 @@ def public_order_status(public_token: str, db: Session = Depends(get_db)):
     return get_public_order_status(db, public_token)
 
 
+@router.post("/public/orders/{public_token}/payment", response_model=QRPaymentCreateResponse)
+def create_public_payment(public_token: str, db: Session = Depends(get_db)):
+    order = db.query(Order).filter(Order.public_token_hash == hash_token(public_token), Order.order_source == "qr_table").first()
+    if order is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found.")
+    return create_qr_payment(db, order)
+
+
+@router.post("/public/orders/{public_token}/payment/verify", response_model=QRPaymentStatusResponse)
+def verify_public_payment(public_token: str, payload: QRPaymentVerifyRequest, db: Session = Depends(get_db)):
+    order = db.query(Order).filter(Order.public_token_hash == hash_token(public_token), Order.order_source == "qr_table").first()
+    if order is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found.")
+    payment = verify_checkout_signature(db, order, payload.provider_order_id, payload.provider_payment_id, payload.signature)
+    return QRPaymentStatusResponse(
+        order_id=order.id,
+        order_number=order.order_number,
+        payment_id=payment.id,
+        provider=payment.provider,
+        provider_order_id=payment.provider_order_id,
+        provider_payment_id=payment.provider_payment_id,
+        amount_paise=payment.amount_paise,
+        currency=payment.currency,
+        status=payment.status,
+        provider_status=payment.provider_status,
+        created_at=payment.created_at,
+        captured_at=payment.captured_at,
+        refunded_at=payment.refunded_at,
+    )
+
+
+@router.post("/public/payments/razorpay/webhook")
+async def razorpay_webhook(request: Request, x_razorpay_signature: str | None = Header(default=None, alias="X-Razorpay-Signature"), x_razorpay_event_id: str | None = Header(default=None, alias="X-Razorpay-Event-Id"), db: Session = Depends(get_db)):
+    if not x_razorpay_signature:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing webhook signature.")
+    raw_body = await request.body()
+    process_webhook(db, raw_body, x_razorpay_signature, x_razorpay_event_id or "")
+    return {"ok": True}
+
+
 @router.post("/admin/restaurant", response_model=RestaurantResponse, status_code=status.HTTP_201_CREATED)
 def create_restaurant(payload: RestaurantCreateRequest, db: Session = Depends(get_db), current_user: User = Depends(require_staff)):
     managed_user = _managed_user(current_user, db)
     if managed_user.restaurant_id:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User is already associated with a restaurant.")
-
     name = payload.name.strip()
-
-    # Recover a restaurant created before the auth-session fix. Re-query and
-    # mutate the managed user so the association is actually committed.
     if managed_user.role == "owner":
         existing = db.query(Restaurant).filter(Restaurant.name == name, Restaurant.active.is_(True)).first()
         if existing is not None:
@@ -112,15 +145,9 @@ def create_restaurant(payload: RestaurantCreateRequest, db: Session = Depends(ge
             db.commit()
             db.refresh(existing)
             return RestaurantResponse(restaurant_id=existing.restaurant_id, name=existing.name, logo_url=existing.logo_url, active=existing.active)
-
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or "restaurant"
     restaurant_id = f"{slug}-{uuid.uuid4().hex[:8]}"
-    restaurant = Restaurant(
-        restaurant_id=restaurant_id,
-        name=name,
-        logo_url=payload.logo_url.strip() if payload.logo_url else None,
-        active=True,
-    )
+    restaurant = Restaurant(restaurant_id=restaurant_id, name=name, logo_url=payload.logo_url.strip() if payload.logo_url else None, active=True)
     db.add(restaurant)
     managed_user.restaurant_id = restaurant_id
     db.commit()
@@ -150,13 +177,7 @@ def list_menu_items(restaurant_id: str, branch_id: str, db: Session = Depends(ge
 
 
 @router.post("/admin/menu-import/preview", response_model=MenuImportPreviewResponse)
-async def preview_menu_import(
-    restaurant_id: str = Form(...),
-    branch_id: str = Form(...),
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_staff),
-):
+async def preview_menu_import(restaurant_id: str = Form(...), branch_id: str = Form(...), file: UploadFile = File(...), db: Session = Depends(get_db), current_user: User = Depends(require_staff)):
     restaurant = _require_restaurant(current_user, db)
     _validate_tenant_payload(restaurant_id, restaurant)
     try:
