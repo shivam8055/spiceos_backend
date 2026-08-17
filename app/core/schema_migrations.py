@@ -54,11 +54,13 @@ def ensure_inventory_tenant_schema(engine) -> None:
 def ensure_payment_schema(engine) -> None:
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
+    dialect = engine.dialect.name
     with engine.begin() as connection:
         if "payments" not in tables:
+            id_definition = "SERIAL PRIMARY KEY" if dialect == "postgresql" else "INTEGER PRIMARY KEY AUTOINCREMENT"
             connection.execute(text(
                 "CREATE TABLE payments ("
-                "id INTEGER PRIMARY KEY, "
+                f"id {id_definition}, "
                 "order_id INTEGER NOT NULL, "
                 "provider VARCHAR NOT NULL, "
                 "provider_order_id VARCHAR NOT NULL, "
