@@ -102,7 +102,7 @@ def create_qr_order(db: Session, table: QRTable, payload: QROrderCreateRequest, 
 
     existing = db.query(Order).filter(Order.idempotency_key == key).first()
     if existing is not None:
-        if existing.qr_table_id != table.id:
+        if existing.qr_table_id != table.id or existing.restaurant_id != table.restaurant_id:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Idempotency key was already used for another table.")
         return QROrderCreateResponse(
             order_id=existing.id,
@@ -152,6 +152,7 @@ def create_qr_order(db: Session, table: QRTable, payload: QROrderCreateRequest, 
     public_token = public_order_token(table, key)
     order = Order(
         order_number=f"QR-{uuid4().hex[:12].upper()}",
+        restaurant_id=table.restaurant_id,
         customer_id=None,
         customer_name=(payload.customer_name or "QR Guest").strip() or "QR Guest",
         customer_phone=payload.customer_phone or None,
@@ -199,7 +200,7 @@ def get_public_order_status(db: Session, public_token: str) -> QROrderStatusResp
     if order is None or order.order_source != "qr_table" or order.qr_table_id is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order status not found.")
     table = db.query(QRTable).filter(QRTable.id == order.qr_table_id).first()
-    if table is None:
+    if table is None or order.restaurant_id != table.restaurant_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order status not found.")
     return QROrderStatusResponse(
         order_number=order.order_number,
