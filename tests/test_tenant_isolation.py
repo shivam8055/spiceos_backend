@@ -5,17 +5,16 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from app.api.v1.inventory import adjust_inventory, get_inventory
 from app.api.v1.orders import get_orders, update_order
-from app.api.v1.users import list_users, update_user_role
-from app.api.v1.inventory import get_inventory, adjust_inventory
+from app.api.v1.users import UserRoleUpdate, list_users, update_user_role
 from app.core.database import Base
 from app.models.inventory_item import InventoryItem
 from app.models.order import Order
 from app.models.restaurant import Restaurant
 from app.models.user import User
-from app.schemas.order import OrderUpdate
 from app.schemas.inventory import InventoryAdjustment
-from app.schemas.user import UserResponse
+from app.schemas.order import OrderUpdate
 
 
 def make_db():
@@ -43,6 +42,7 @@ def seed():
         InventoryItem(restaurant_id="restaurant-b", name="Rice B", unit="kg", quantity=10, reorder_level=2, cost_per_unit=50, is_active=True),
     ])
     db.commit()
+    db.refresh(order_b)
     return db, owner_a, owner_b, staff_a, order_a, order_b
 
 
@@ -68,7 +68,7 @@ def test_owner_user_admin_is_scoped_to_current_restaurant():
 def test_owner_cannot_change_user_in_another_restaurant():
     db, owner_a, owner_b, _, _, _ = seed()
     with pytest.raises(HTTPException) as exc:
-        update_user_role(owner_b.id, {"role": "staff"}, db=db, current_user=owner_a)
+        update_user_role(owner_b.id, UserRoleUpdate(role="staff"), db=db, current_user=owner_a)
     assert exc.value.status_code == 404
 
 
