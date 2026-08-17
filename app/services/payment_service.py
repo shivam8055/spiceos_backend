@@ -101,6 +101,9 @@ def verify_checkout_signature(db: Session, order: Order, provider_order_id: str,
     if payment.provider != "razorpay":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Unsupported payment provider.")
 
+    # Always authenticate the checkout callback, even when the webhook already
+    # marked the payment as captured. The webhook is authoritative for capture,
+    # so a repeated callback must not downgrade a paid payment to "verified".
     message = f"{provider_order_id}|{provider_payment_id}".encode("utf-8")
     expected = hmac.new(RAZORPAY_KEY_SECRET.encode("utf-8"), message, hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, signature):
@@ -108,6 +111,11 @@ def verify_checkout_signature(db: Session, order: Order, provider_order_id: str,
 
     if payment.provider_payment_id and payment.provider_payment_id != provider_payment_id:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Payment record is already bound to another provider payment.")
+
+    if order.payment_status == "paid" or payment.status == "paid":
+        return payment
+    if order.payment_status == "refunded":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This order has already been refunded.")
 
     payment.provider_payment_id = provider_payment_id
     payment.status = "verified"
