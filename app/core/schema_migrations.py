@@ -29,8 +29,6 @@ def ensure_order_columns(engine) -> None:
         connection.execute(text("UPDATE orders SET status = 'created' WHERE status IS NULL"))
         connection.execute(text("UPDATE orders SET payment_status = 'pending' WHERE payment_status IS NULL"))
         connection.execute(text("UPDATE orders SET order_source = 'Unknown' WHERE order_source IS NULL"))
-        # Existing QR orders already contain an authoritative tenant through qr_table_id.
-        # Backfill only those rows; never guess ownership for legacy manual orders.
         if "qr_tables" in inspector.get_table_names():
             connection.execute(text(
                 "UPDATE orders "
@@ -53,6 +51,42 @@ def ensure_inventory_tenant_schema(engine) -> None:
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_inventory_items_restaurant_id ON inventory_items(restaurant_id)"))
 
 
+def ensure_payment_schema(engine) -> None:
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    dialect = engine.dialect.name
+    with engine.begin() as connection:
+        if "payments" not in tables:
+            id_definition = "SERIAL PRIMARY KEY" if dialect == "postgresql" else "INTEGER PRIMARY KEY AUTOINCREMENT"
+            connection.execute(text(
+                "CREATE TABLE payments ("
+                f"id {id_definition}, "
+                "order_id INTEGER NOT NULL, "
+                "provider VARCHAR NOT NULL, "
+                "provider_order_id VARCHAR NOT NULL, "
+                "provider_payment_id VARCHAR, "
+                "amount_paise INTEGER NOT NULL, "
+                "currency VARCHAR NOT NULL, "
+                "status VARCHAR NOT NULL, "
+                "provider_status VARCHAR, "
+                "webhook_event_id VARCHAR, "
+                "last_error TEXT, "
+                "created_at TIMESTAMP NOT NULL, "
+                "updated_at TIMESTAMP NOT NULL, "
+                "captured_at TIMESTAMP, "
+                "refunded_at TIMESTAMP"
+                ")"
+            ))
+        connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_order_id ON payments(order_id)"))
+        connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_provider_order_id ON payments(provider_order_id)"))
+        connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_provider_payment_id ON payments(provider_payment_id)"))
+        connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_webhook_event_id ON payments(webhook_event_id)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_payments_order_id ON payments(order_id)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_payments_provider_order_id ON payments(provider_order_id)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_payments_provider_payment_id ON payments(provider_payment_id)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_payments_status ON payments(status)"))
+
+
 def ensure_tenant_schema(engine) -> None:
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
@@ -70,3 +104,4 @@ def ensure_tenant_schema(engine) -> None:
 def ensure_qr_ordering_schema(engine) -> None:
     ensure_order_columns(engine)
     ensure_tenant_schema(engine)
+    ensure_payment_schema(engine)

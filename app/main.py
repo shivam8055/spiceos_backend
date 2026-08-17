@@ -6,6 +6,7 @@ from app.core.database import Base, engine
 from app.core.schema_migrations import ensure_qr_ordering_schema
 from app.models.order import Order
 from app.models.order_item import OrderItem
+from app.models.payment import Payment
 from app.models.user import User
 from app.models.restaurant import Restaurant
 from app.models.inventory_item import InventoryItem
