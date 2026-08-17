@@ -130,3 +130,43 @@ def test_qr_order_total_is_immutable():
     with pytest.raises(HTTPException) as exc:
         update_order(order.id, OrderUpdate(total=1), db=db, current_user=manager)
     assert exc.value.status_code == 409
+
+
+def test_qr_order_cannot_start_preparation_before_payment():
+    db, _, manager, _ = seed()
+    order = Order(
+        order_number="QR-102",
+        restaurant_id="restaurant-a",
+        customer_name="QR Guest",
+        total=249,
+        status="created",
+        payment_status="pending",
+        order_source="qr_table",
+    )
+    db.add(order)
+    db.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        update_order(order.id, OrderUpdate(status="preparing"), db=db, current_user=manager)
+
+    assert exc.value.status_code == 409
+    assert "must be paid" in exc.value.detail
+
+
+def test_paid_qr_order_can_start_preparation():
+    db, _, manager, _ = seed()
+    order = Order(
+        order_number="QR-103",
+        restaurant_id="restaurant-a",
+        customer_name="QR Guest",
+        total=249,
+        status="created",
+        payment_status="paid",
+        order_source="qr_table",
+    )
+    db.add(order)
+    db.commit()
+
+    response = update_order(order.id, OrderUpdate(status="preparing"), db=db, current_user=manager)
+
+    assert response.status == "preparing"
