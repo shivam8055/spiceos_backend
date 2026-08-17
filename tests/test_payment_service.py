@@ -122,6 +122,39 @@ def test_invalid_checkout_signature_is_rejected(monkeypatch):
         assert exc.status_code == 400
 
 
+def test_paid_checkout_callback_is_idempotent_but_still_authenticated(monkeypatch):
+    monkeypatch.setattr(payment_service, "RAZORPAY_KEY_ID", "rzp_test_key")
+    monkeypatch.setattr(payment_service, "RAZORPAY_KEY_SECRET", "rzp_test_secret")
+    db = make_db()
+    order, payment = seed_order(db)
+    provider_payment_id = "pay_RAZORPAY123"
+    payment.provider_payment_id = provider_payment_id
+    payment.status = "paid"
+    order.payment_status = "paid"
+    db.commit()
+
+    message = f"{payment.provider_order_id}|{provider_payment_id}".encode()
+    signature = hmac.new(b"rzp_test_secret", message, hashlib.sha256).hexdigest()
+    result = verify_checkout_signature(db, order, payment.provider_order_id, provider_payment_id, signature)
+    assert result.id == payment.id
+    assert result.status == "paid"
+
+    other_payment_id = "pay_other"
+    other_message = f"{payment.provider_order_id}|{other_payment_id}".encode()
+    other_signature = hmac.new(b"rzp_test_secret", other_message, hashlib.sha256).hexdigest()
+    try:
+        verify_checkout_signature(db, order, payment.provider_order_id, other_payment_id, other_signature)
+        assert False, "paid callback must not bind a different payment ID"
+    except HTTPException as exc:
+        assert exc.status_code == 409
+
+    try:
+        verify_checkout_signature(db, order, payment.provider_order_id, provider_payment_id, "invalid")
+        assert False, "paid callback must still validate its signature"
+    except HTTPException as exc:
+        assert exc.status_code == 400
+
+
 def test_captured_webhook_marks_order_paid_and_is_idempotent(monkeypatch):
     monkeypatch.setattr(payment_service, "RAZORPAY_WEBHOOK_SECRET", "webhook_secret")
     db = make_db()
@@ -152,6 +185,38 @@ def test_captured_webhook_marks_order_paid_and_is_idempotent(monkeypatch):
     assert payment.status == "paid"
     assert payment.provider_payment_id == "pay_RAZORPAY123"
     assert payment.webhook_event_id == "evt_001"
+
+
+def test_failed_webhook_marks_payment_failed_without_marking_order_paid(monkeypatch):
+    monkeypatch.setattr(payment_service, "RAZORPAY_WEBHOOK_SECRET", "webhook_secret")
+    db = make_db()
+    order, payment = seed_order(db)
+    payload = {
+        "event": "payment.failed",
+        "payload": {
+            "payment": {
+                "entity": {
+                    "id": "pay_RAZORPAY_FAILED",
+                    "order_id": payment.provider_order_id,
+                    "amount": 24900,
+                    "currency": "INR",
+                    "status": "failed",
+                    "error_description": "Payment declined in test mode",
+                }
+            }
+        },
+    }
+    raw = json.dumps(payload, separators=(",", ":")).encode()
+    signature = hmac.new(b"webhook_secret", raw, hashlib.sha256).hexdigest()
+
+    process_webhook(db, raw, signature, "evt_failed_001")
+
+    db.refresh(order)
+    db.refresh(payment)
+    assert payment.status == "failed"
+    assert payment.provider_payment_id == "pay_RAZORPAY_FAILED"
+    assert payment.last_error == "Payment declined in test mode"
+    assert order.payment_status == "pending"
 
 
 def test_refund_webhook_marks_order_refunded(monkeypatch):

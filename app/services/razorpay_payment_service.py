@@ -53,8 +53,6 @@ def create_qr_payment(db: Session, order: Order) -> dict:
     if amount_paise <= 0:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Order total must be greater than zero for online payment.")
 
-    # Razorpay's Orders API does not accept a `capture` field. Capture is
-    # controlled by the Razorpay payment/order configuration and webhook flow.
     payload = {
         "amount": amount_paise,
         "currency": "INR",
@@ -126,10 +124,17 @@ def verify_checkout_signature(db: Session, order: Order, provider_order_id: str,
     if payment.provider != "razorpay":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Unsupported payment provider.")
 
-    # The Razorpay webhook is authoritative for capture. The checkout callback
-    # can arrive after the webhook, so a repeated verify request must be
-    # idempotent instead of returning 409 after the order is already paid.
-    if order.payment_status == "paid":
+    # The Razorpay webhook is authoritative for capture. A checkout callback
+    # may arrive after that webhook, so already-paid callbacks are idempotent.
+    # Authentication is still mandatory: the callback must reference the exact
+    # captured payment ID and carry a valid Razorpay checkout signature.
+    if payment.status == "paid" or order.payment_status == "paid":
+        if payment.provider_payment_id != provider_payment_id:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Payment callback does not match the captured payment.")
+        message = f"{payment.provider_order_id}|{provider_payment_id}".encode("utf-8")
+        expected = hmac.new(RAZORPAY_KEY_SECRET.encode("utf-8"), message, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, signature):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payment signature.")
         return payment
     if order.payment_status == "refunded":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This order has already been refunded.")
@@ -139,8 +144,6 @@ def verify_checkout_signature(db: Session, order: Order, provider_order_id: str,
     if not hmac.compare_digest(expected, signature):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payment signature.")
 
-    # Razorpay permits multiple attempts against one order. Until the order is
-    # captured, bind the latest verified payment attempt to this local record.
     payment.provider_payment_id = provider_payment_id
     payment.status = "verified"
     payment.provider_status = "signature_verified"
