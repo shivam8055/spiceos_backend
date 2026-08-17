@@ -8,6 +8,7 @@ def ensure_order_columns(engine) -> None:
 
     existing = {column["name"] for column in inspector.get_columns("orders")}
     additions = {
+        "restaurant_id": "VARCHAR",
         "customer_id": "VARCHAR",
         "primary_item": "VARCHAR",
         "created_at": "TIMESTAMP",
@@ -28,6 +29,7 @@ def ensure_order_columns(engine) -> None:
         connection.execute(text("UPDATE orders SET status = 'created' WHERE status IS NULL"))
         connection.execute(text("UPDATE orders SET payment_status = 'pending' WHERE payment_status IS NULL"))
         connection.execute(text("UPDATE orders SET order_source = 'Unknown' WHERE order_source IS NULL"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_orders_restaurant_id ON orders(restaurant_id)"))
         connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_orders_idempotency_key ON orders(idempotency_key)"))
         connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_orders_public_token_hash ON orders(public_token_hash)"))
 
