@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+import logging
 from datetime import datetime
 
 import httpx
@@ -13,6 +14,7 @@ from app.models.order import Order
 from app.models.payment import Payment
 
 RAZORPAY_BASE_URL = "https://api.razorpay.com/v1"
+logger = logging.getLogger(__name__)
 
 
 def _require_credentials() -> None:
@@ -67,11 +69,30 @@ def create_qr_payment(db: Session, order: Order) -> dict:
         )
         response.raise_for_status()
         provider_order = response.json()
-    except (httpx.HTTPError, ValueError) as exc:
+    except httpx.HTTPStatusError as exc:
+        response = exc.response
+        logger.error(
+            "Razorpay order creation failed: status=%s body=%s",
+            response.status_code,
+            response.text[:1000],
+        )
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unable to create the payment order.") from exc
+    except httpx.RequestError as exc:
+        logger.error("Razorpay connection failed: %s", str(exc))
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Unable to reach payment provider.") from exc
+    except ValueError as exc:
+        logger.error("Razorpay returned invalid JSON: %s", str(exc))
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Payment provider returned an invalid response.") from exc
 
     provider_order_id = provider_order.get("id")
     if not provider_order_id or provider_order.get("amount") != amount_paise or provider_order.get("currency") != "INR":
+        logger.error(
+            "Razorpay returned invalid order: id=%s amount=%s currency=%s expected_amount=%s",
+            provider_order_id,
+            provider_order.get("amount"),
+            provider_order.get("currency"),
+            amount_paise,
+        )
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Payment provider returned an invalid order.")
 
     payment = Payment(
