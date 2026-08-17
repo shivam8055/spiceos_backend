@@ -17,14 +17,27 @@ from app.schemas.inventory import (
 router = APIRouter()
 
 
+def _require_restaurant_id(current_user: User) -> str:
+    if not current_user.restaurant_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="User is not associated with a restaurant.",
+        )
+    return current_user.restaurant_id
+
+
 @router.get("/", response_model=list[InventoryItemResponse])
 def get_inventory(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_staff),
 ):
+    restaurant_id = _require_restaurant_id(current_user)
     return (
         db.query(InventoryItem)
-        .filter(InventoryItem.is_active.is_(True))
+        .filter(
+            InventoryItem.restaurant_id == restaurant_id,
+            InventoryItem.is_active.is_(True),
+        )
         .order_by(InventoryItem.name.asc())
         .all()
     )
@@ -35,9 +48,11 @@ def get_low_stock(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_staff),
 ):
+    restaurant_id = _require_restaurant_id(current_user)
     return (
         db.query(InventoryItem)
         .filter(
+            InventoryItem.restaurant_id == restaurant_id,
             InventoryItem.is_active.is_(True),
             InventoryItem.quantity <= InventoryItem.reorder_level,
         )
@@ -46,17 +61,15 @@ def get_low_stock(
     )
 
 
-@router.post(
-    "/",
-    response_model=InventoryItemResponse,
-    status_code=status.HTTP_201_CREATED,
-)
+@router.post("/", response_model=InventoryItemResponse, status_code=status.HTTP_201_CREATED)
 def create_inventory_item(
     payload: InventoryItemCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_staff),
 ):
+    restaurant_id = _require_restaurant_id(current_user)
     item = InventoryItem(
+        restaurant_id=restaurant_id,
         name=payload.name.strip(),
         sku=payload.sku.strip() if payload.sku else None,
         unit=payload.unit.strip(),
@@ -90,16 +103,14 @@ def create_inventory_item(
     return item
 
 
-@router.post(
-    "/{item_id}/adjust",
-    response_model=InventoryItemResponse,
-)
+@router.post("/{item_id}/adjust", response_model=InventoryItemResponse)
 def adjust_inventory(
     item_id: int,
     payload: InventoryAdjustment,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_staff),
 ):
+    restaurant_id = _require_restaurant_id(current_user)
     if payload.quantity_delta == 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -108,14 +119,15 @@ def adjust_inventory(
 
     item = (
         db.query(InventoryItem)
-        .filter(InventoryItem.id == item_id, InventoryItem.is_active.is_(True))
+        .filter(
+            InventoryItem.id == item_id,
+            InventoryItem.restaurant_id == restaurant_id,
+            InventoryItem.is_active.is_(True),
+        )
         .first()
     )
     if item is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Inventory item not found.",
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inventory item not found.")
 
     new_quantity = item.quantity + payload.quantity_delta
     if new_quantity < 0:
@@ -137,25 +149,24 @@ def adjust_inventory(
     return item
 
 
-@router.get(
-    "/{item_id}/movements",
-    response_model=list[InventoryMovementResponse],
-)
+@router.get("/{item_id}/movements", response_model=list[InventoryMovementResponse])
 def get_inventory_movements(
     item_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_staff),
 ):
+    restaurant_id = _require_restaurant_id(current_user)
     item_exists = (
         db.query(InventoryItem.id)
-        .filter(InventoryItem.id == item_id, InventoryItem.is_active.is_(True))
+        .filter(
+            InventoryItem.id == item_id,
+            InventoryItem.restaurant_id == restaurant_id,
+            InventoryItem.is_active.is_(True),
+        )
         .first()
     )
     if item_exists is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Inventory item not found.",
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inventory item not found.")
 
     return (
         db.query(InventoryMovement)
