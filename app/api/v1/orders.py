@@ -164,6 +164,16 @@ def update_order(
                 status_code=409,
                 detail=f"Invalid order status transition: {current_status} -> {next_status}.",
             )
+        if (
+            current_status == "created"
+            and next_status == "preparing"
+            and order.order_source == "qr_table"
+            and (order.payment_status or "pending") != "paid"
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="QR orders must be paid before kitchen preparation can start.",
+            )
         order.status = next_status
 
     if "payment_status" in updates:
