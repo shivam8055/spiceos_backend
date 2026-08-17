@@ -139,8 +139,11 @@ def test_paid_checkout_callback_is_idempotent_but_still_authenticated(monkeypatc
     assert result.id == payment.id
     assert result.status == "paid"
 
+    other_payment_id = "pay_other"
+    other_message = f"{payment.provider_order_id}|{other_payment_id}".encode()
+    other_signature = hmac.new(b"rzp_test_secret", other_message, hashlib.sha256).hexdigest()
     try:
-        verify_checkout_signature(db, order, payment.provider_order_id, "pay_other", signature)
+        verify_checkout_signature(db, order, payment.provider_order_id, other_payment_id, other_signature)
         assert False, "paid callback must not bind a different payment ID"
     except HTTPException as exc:
         assert exc.status_code == 409
