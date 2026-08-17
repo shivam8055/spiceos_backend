@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.firebase import initialize_firebase
 from app.models.user import User
-from app.services.auth_service import AuthService
+from app.services.auth_service import AuthService, FirebaseIdentityConflict
 
 logger = logging.getLogger(__name__)
 security = HTTPBearer(auto_error=True)
@@ -61,6 +61,13 @@ def get_current_user(
             email=email,
             name=decoded_token.get("name"),
         )
+    except FirebaseIdentityConflict:
+        db.rollback()
+        logger.warning("Rejected Firebase identity conflict for email: %s", email)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This email is already linked to another SpiceOS account.",
+        ) from None
     except Exception:
         db.rollback()
         logger.exception("Failed to load SpiceOS user: %s", email)
