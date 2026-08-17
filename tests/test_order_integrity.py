@@ -28,10 +28,10 @@ def seed():
     return db, owner, manager, staff
 
 
-def create_manual(db, staff, payment_status="pending"):
+def create_manual(db, user, payment_status="pending", order_number="A-100"):
     return create_order(
         OrderCreate(
-            order_number="A-100",
+            order_number=order_number,
             customer_name="Customer",
             primary_item="Paneer Butter Masala",
             total=249,
@@ -39,7 +39,7 @@ def create_manual(db, staff, payment_status="pending"):
             order_source="manual",
         ),
         db=db,
-        current_user=staff,
+        current_user=user,
     )
 
 
@@ -89,8 +89,15 @@ def test_staff_cannot_create_order_as_paid():
     assert exc.value.status_code == 403
 
 
+def test_new_order_cannot_start_refunded():
+    db, _, manager, _ = seed()
+    with pytest.raises(HTTPException) as exc:
+        create_manual(db, manager, payment_status="refunded", order_number="A-101")
+    assert exc.value.status_code == 422
+
+
 def test_qr_order_source_is_immutable():
-    db, _, manager, staff = seed()
+    db, _, manager, _ = seed()
     order = Order(
         order_number="QR-100",
         restaurant_id="restaurant-a",
@@ -108,7 +115,7 @@ def test_qr_order_source_is_immutable():
 
 
 def test_qr_order_total_is_immutable():
-    db, _, manager, staff = seed()
+    db, _, manager, _ = seed()
     order = Order(
         order_number="QR-101",
         restaurant_id="restaurant-a",
