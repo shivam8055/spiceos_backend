@@ -124,12 +124,11 @@ def verify_checkout_signature(db: Session, order: Order, provider_order_id: str,
     if payment.provider != "razorpay":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Unsupported payment provider.")
 
-    # The Razorpay webhook is authoritative for capture. The checkout callback
-    # can arrive after the webhook, so a repeated verify request must be
-    # idempotent instead of returning 409 after the order is already paid.
-    # Still validate the callback binding and signature before returning the
-    # already-paid payment, so a callback cannot claim a different payment ID.
-    if order.payment_status == "paid":
+    # The Razorpay webhook is authoritative for capture. A checkout callback
+    # may arrive after that webhook, so already-paid callbacks are idempotent.
+    # Authentication is still mandatory: the callback must reference the exact
+    # captured payment ID and carry a valid Razorpay checkout signature.
+    if payment.status == "paid" or order.payment_status == "paid":
         if payment.provider_payment_id != provider_payment_id:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Payment callback does not match the captured payment.")
         message = f"{payment.provider_order_id}|{provider_payment_id}".encode("utf-8")
