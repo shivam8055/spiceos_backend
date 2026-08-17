@@ -33,3 +33,7 @@ QR_PUBLIC_TOKEN_SECRET = os.getenv("QR_PUBLIC_TOKEN_SECRET")
 if not QR_PUBLIC_TOKEN_SECRET:
     # Development fallback only. Production deployments must provide a stable secret.
     QR_PUBLIC_TOKEN_SECRET = "spiceos-dev-qr-token-secret"
+
+RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
+RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
+RAZORPAY_WEBHOOK_SECRET = os.getenv("RAZORPAY_WEBHOOK_SECRET")
