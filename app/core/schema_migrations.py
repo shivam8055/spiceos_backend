@@ -34,6 +34,17 @@ def ensure_order_columns(engine) -> None:
         connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_orders_public_token_hash ON orders(public_token_hash)"))
 
 
+def ensure_inventory_tenant_schema(engine) -> None:
+    inspector = inspect(engine)
+    if "inventory_items" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("inventory_items")}
+    with engine.begin() as connection:
+        if "restaurant_id" not in existing:
+            connection.execute(text("ALTER TABLE inventory_items ADD COLUMN restaurant_id VARCHAR"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_inventory_items_restaurant_id ON inventory_items(restaurant_id)"))
+
+
 def ensure_tenant_schema(engine) -> None:
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
@@ -44,6 +55,8 @@ def ensure_tenant_schema(engine) -> None:
             with engine.begin() as connection:
                 connection.execute(text("ALTER TABLE users ADD COLUMN restaurant_id VARCHAR"))
                 connection.execute(text("CREATE INDEX IF NOT EXISTS ix_users_restaurant_id ON users(restaurant_id)"))
+
+    ensure_inventory_tenant_schema(engine)
 
 
 def ensure_qr_ordering_schema(engine) -> None:
