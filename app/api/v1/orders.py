@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.api.dependencies import require_staff
 from app.core.database import get_db
 from app.models.order import Order
+from app.models.restaurant import Restaurant
 from app.models.user import User
 from app.schemas.order import OrderCreate, OrderResponse, OrderUpdate
 
@@ -21,6 +22,28 @@ STATUS_TRANSITIONS = {
     "delivered": set(),
     "cancelled": set(),
 }
+
+
+def _require_restaurant(current_user: User, db: Session) -> Restaurant:
+    if not current_user.restaurant_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="User is not associated with a restaurant.",
+        )
+    restaurant = (
+        db.query(Restaurant)
+        .filter(
+            Restaurant.restaurant_id == current_user.restaurant_id,
+            Restaurant.active.is_(True),
+        )
+        .first()
+    )
+    if restaurant is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Restaurant access is inactive or invalid.",
+        )
+    return restaurant
 
 
 def _ensure_order_defaults(order: Order) -> None:
@@ -44,7 +67,13 @@ def get_orders(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_staff),
 ):
-    orders = db.query(Order).order_by(Order.created_at.desc(), Order.id.desc()).all()
+    restaurant = _require_restaurant(current_user, db)
+    orders = (
+        db.query(Order)
+        .filter(Order.restaurant_id == restaurant.restaurant_id)
+        .order_by(Order.created_at.desc(), Order.id.desc())
+        .all()
+    )
     changed = False
     for order in orders:
         before = (
@@ -71,6 +100,7 @@ def create_order(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_staff),
 ):
+    restaurant = _require_restaurant(current_user, db)
     if db.query(Order).filter(Order.order_number == order.order_number).first():
         raise HTTPException(status_code=409, detail="Order number already exists.")
     if order.payment_status not in VALID_PAYMENT_STATUSES:
@@ -78,6 +108,7 @@ def create_order(
 
     new_order = Order(
         order_number=order.order_number,
+        restaurant_id=restaurant.restaurant_id,
         customer_id=order.customer_id,
         customer_name=order.customer_name,
         primary_item=order.primary_item,
@@ -100,7 +131,15 @@ def update_order(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_staff),
 ):
-    order = db.query(Order).filter(Order.id == order_id).first()
+    restaurant = _require_restaurant(current_user, db)
+    order = (
+        db.query(Order)
+        .filter(
+            Order.id == order_id,
+            Order.restaurant_id == restaurant.restaurant_id,
+        )
+        .first()
+    )
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found.")
 
