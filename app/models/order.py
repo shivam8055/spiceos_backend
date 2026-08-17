@@ -10,6 +10,7 @@ class Order(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     order_number = Column(String, unique=True, nullable=False)
+    restaurant_id = Column(String, nullable=True, index=True)
     customer_id = Column(String, nullable=True, index=True)
     customer_name = Column(String, nullable=False)
     customer_phone = Column(String, nullable=True)

@@ -9,6 +9,7 @@ class InventoryItem(Base):
     __tablename__ = "inventory_items"
 
     id = Column(Integer, primary_key=True, index=True)
+    restaurant_id = Column(String, nullable=True, index=True)
     name = Column(String, nullable=False, index=True)
     sku = Column(String, unique=True, nullable=True, index=True)
     unit = Column(String, nullable=False, default="unit")

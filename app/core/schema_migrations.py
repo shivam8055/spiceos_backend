@@ -8,6 +8,7 @@ def ensure_order_columns(engine) -> None:
 
     existing = {column["name"] for column in inspector.get_columns("orders")}
     additions = {
+        "restaurant_id": "VARCHAR",
         "customer_id": "VARCHAR",
         "primary_item": "VARCHAR",
         "created_at": "TIMESTAMP",
@@ -28,8 +29,28 @@ def ensure_order_columns(engine) -> None:
         connection.execute(text("UPDATE orders SET status = 'created' WHERE status IS NULL"))
         connection.execute(text("UPDATE orders SET payment_status = 'pending' WHERE payment_status IS NULL"))
         connection.execute(text("UPDATE orders SET order_source = 'Unknown' WHERE order_source IS NULL"))
+        # Existing QR orders already contain an authoritative tenant through qr_table_id.
+        # Backfill only those rows; never guess ownership for legacy manual orders.
+        if "qr_tables" in inspector.get_table_names():
+            connection.execute(text(
+                "UPDATE orders "
+                "SET restaurant_id = (SELECT restaurant_id FROM qr_tables WHERE qr_tables.id = orders.qr_table_id) "
+                "WHERE restaurant_id IS NULL AND qr_table_id IS NOT NULL"
+            ))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_orders_restaurant_id ON orders(restaurant_id)"))
         connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_orders_idempotency_key ON orders(idempotency_key)"))
         connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_orders_public_token_hash ON orders(public_token_hash)"))
+
+
+def ensure_inventory_tenant_schema(engine) -> None:
+    inspector = inspect(engine)
+    if "inventory_items" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("inventory_items")}
+    with engine.begin() as connection:
+        if "restaurant_id" not in existing:
+            connection.execute(text("ALTER TABLE inventory_items ADD COLUMN restaurant_id VARCHAR"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_inventory_items_restaurant_id ON inventory_items(restaurant_id)"))
 
 
 def ensure_tenant_schema(engine) -> None:
@@ -42,6 +63,8 @@ def ensure_tenant_schema(engine) -> None:
             with engine.begin() as connection:
                 connection.execute(text("ALTER TABLE users ADD COLUMN restaurant_id VARCHAR"))
                 connection.execute(text("CREATE INDEX IF NOT EXISTS ix_users_restaurant_id ON users(restaurant_id)"))
+
+    ensure_inventory_tenant_schema(engine)
 
 
 def ensure_qr_ordering_schema(engine) -> None:
