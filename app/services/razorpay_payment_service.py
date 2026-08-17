@@ -53,11 +53,12 @@ def create_qr_payment(db: Session, order: Order) -> dict:
     if amount_paise <= 0:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Order total must be greater than zero for online payment.")
 
+    # Razorpay's Orders API does not accept a `capture` field. Capture is
+    # controlled by the Razorpay payment/order configuration and webhook flow.
     payload = {
         "amount": amount_paise,
         "currency": "INR",
         "receipt": order.order_number,
-        "capture": "automatic",
         "notes": {"spiceos_order_id": str(order.id)},
     }
     try:
