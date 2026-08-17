@@ -6,6 +6,10 @@ from app.repositories.user_repository import UserRepository
 OWNER_EMAIL = "admin@spiceos.co.in"
 
 
+class FirebaseIdentityConflict(Exception):
+    """Raised when a verified email is already bound to another Firebase UID."""
+
+
 class AuthService:
     def __init__(self, db: Session):
         self.repository = UserRepository(db)
@@ -16,9 +20,7 @@ class AuthService:
         email: str,
         name: str | None = None,
     ):
-        user = self.repository.get_by_firebase_uid(
-            firebase_uid
-        )
+        user = self.repository.get_by_firebase_uid(firebase_uid)
 
         if user:
             return self.repository.update_user(
@@ -27,18 +29,13 @@ class AuthService:
                 name=name,
             )
 
-        existing_email_user = self.repository.get_by_email(
-            email
-        )
-
+        existing_email_user = self.repository.get_by_email(email)
         if existing_email_user:
-            return existing_email_user
+            raise FirebaseIdentityConflict(
+                "This email is already linked to a different Firebase account."
+            )
 
-        role = (
-            "owner"
-            if email.lower() == OWNER_EMAIL.lower()
-            else "staff"
-        )
+        role = "owner" if email.lower() == OWNER_EMAIL.lower() else "staff"
 
         return self.repository.create_user(
             firebase_uid=firebase_uid,
