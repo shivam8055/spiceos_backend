@@ -205,6 +205,7 @@ def get_public_order_status(db: Session, public_token: str) -> QROrderStatusResp
     return QROrderStatusResponse(
         order_number=order.order_number,
         status=order.status or "created",
+        payment_status=order.payment_status or "pending",
         total=float(order.total),
         currency="INR",
         table_name=table.table_name,
