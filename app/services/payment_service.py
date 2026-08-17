@@ -34,24 +34,6 @@ def _payment_response(payment: Payment, order: Order) -> dict:
     }
 
 
-def _status_response(payment: Payment, order: Order) -> dict:
-    return {
-        "order_id": order.id,
-        "order_number": order.order_number,
-        "payment_id": payment.id,
-        "provider": payment.provider,
-        "provider_order_id": payment.provider_order_id,
-        "provider_payment_id": payment.provider_payment_id,
-        "amount_paise": payment.amount_paise,
-        "currency": payment.currency,
-        "status": payment.status,
-        "provider_status": payment.provider_status,
-        "created_at": payment.created_at,
-        "captured_at": payment.captured_at,
-        "refunded_at": payment.refunded_at,
-    }
-
-
 def create_qr_payment(db: Session, order: Order) -> dict:
     _require_credentials()
     if order.order_source != "qr_table" or order.public_token_hash is None:
@@ -158,25 +140,50 @@ def process_webhook(db: Session, raw_body: bytes, signature: str, event_id: str)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid webhook payload.") from exc
 
     event = payload.get("event")
-    entity = ((payload.get("payload") or {}).get("payment") or {}).get("entity") or {}
-    provider_order_id = entity.get("order_id")
-    provider_payment_id = entity.get("id")
+    payload_root = payload.get("payload") or {}
+    payment_entity = (payload_root.get("payment") or {}).get("entity") or {}
+    refund_entity = (payload_root.get("refund") or {}).get("entity") or {}
+
+    if event in {"refund.processed", "payment.refunded"}:
+        provider_payment_id = refund_entity.get("payment_id")
+        payment = db.query(Payment).filter(Payment.provider_payment_id == provider_payment_id).first() if provider_payment_id else None
+        if payment is None:
+            # Ignore valid provider events for payments that do not belong to this instance.
+            return
+        amount = int(refund_entity.get("amount", 0))
+        if amount <= 0 or amount > payment.amount_paise:
+            payment.last_error = "Provider refund amount was invalid."
+            db.commit()
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Invalid refund amount.")
+        payment.provider_status = refund_entity.get("status") or event
+        payment.webhook_event_id = event_id
+        payment.status = "refunded"
+        payment.refunded_at = payment.refunded_at or datetime.utcnow()
+        order = db.query(Order).filter(Order.id == payment.order_id).first()
+        if order is not None:
+            order.payment_status = "refunded"
+        db.commit()
+        return
+
+    provider_order_id = payment_entity.get("order_id")
+    provider_payment_id = payment_entity.get("id")
     if not event or not provider_order_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Webhook is missing payment identifiers.")
 
     payment = db.query(Payment).filter(Payment.provider_order_id == provider_order_id).first()
     if payment is None:
-        # A valid provider event for an order not created by this SpiceOS instance
-        # must not create local payment records.
         return
 
-    if entity.get("currency") != payment.currency or int(entity.get("amount", -1)) != payment.amount_paise:
+    if payment_entity.get("currency") != payment.currency or int(payment_entity.get("amount", -1)) != payment.amount_paise:
         payment.last_error = "Provider amount or currency did not match the local payment."
         db.commit()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Payment amount or currency mismatch.")
 
+    if payment.provider_payment_id and provider_payment_id and payment.provider_payment_id != provider_payment_id:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Payment is already bound to another provider payment.")
+
     payment.provider_payment_id = provider_payment_id or payment.provider_payment_id
-    payment.provider_status = entity.get("status")
+    payment.provider_status = payment_entity.get("status")
     payment.webhook_event_id = event_id
 
     order = db.query(Order).filter(Order.id == payment.order_id).first()
@@ -192,11 +199,7 @@ def process_webhook(db: Session, raw_body: bytes, signature: str, event_id: str)
         order.payment_status = "paid"
     elif event == "payment.failed":
         payment.status = "failed"
-        payment.last_error = (entity.get("error_description") or entity.get("error_reason") or "Payment failed")[:1000]
-    elif event in {"refund.processed", "payment.refunded"}:
-        payment.status = "refunded"
-        payment.refunded_at = payment.refunded_at or now
-        order.payment_status = "refunded"
+        payment.last_error = (payment_entity.get("error_description") or payment_entity.get("error_reason") or "Payment failed")[:1000]
     else:
         payment.status = payment.status or "created"
 
