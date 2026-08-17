@@ -212,4 +212,9 @@ def get_public_order_status(db: Session, public_token: str) -> QROrderStatusResp
 
 
 def qr_url(token: str) -> str:
-    return f"{PUBLIC_QR_BASE_URL.rstrip('/')}/{token}"
+    base = PUBLIC_QR_BASE_URL.rstrip('/')
+    if '#/' in base:
+        return f'{base}/{token}'
+    if base.endswith('/order'):
+        return f'{base[:-6]}/#/order/{token}'
+    return f'{base}/#/{token}'

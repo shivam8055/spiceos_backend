@@ -21,9 +21,12 @@ CORS_ALLOWED_ORIGINS = [
     if origin.strip()
 ]
 
+# Flutter web uses hash routing in the current frontend. The QR URL must put
+# the customer route inside the hash; otherwise GoRouter sees the fragment
+# (/menu) and opens the staff menu screen instead of the public order screen.
 PUBLIC_QR_BASE_URL = os.getenv(
     "PUBLIC_QR_BASE_URL",
-    "https://app.spiceos.co.in/order",
+    "https://app.spiceos.co.in/#/order",
 )
 
 QR_PUBLIC_TOKEN_SECRET = os.getenv("QR_PUBLIC_TOKEN_SECRET")
