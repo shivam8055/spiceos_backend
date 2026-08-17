@@ -27,7 +27,7 @@ from app.schemas.qr_admin import (
 )
 from app.schemas.qr_ordering import QROrderCreateRequest, QROrderCreateResponse, QRMenuResponse, QROrderStatusResponse
 from app.services.menu_import import MenuImportError, extract_menu_from_image
-from app.services.payment_service import create_qr_payment, process_webhook, verify_checkout_signature
+from app.services.razorpay_payment_service import create_qr_payment, process_webhook, verify_checkout_signature
 from app.services.qr_ordering import create_qr_order, get_public_order_status, hash_token, menu_response, qr_url, resolve_qr_table
 
 router = APIRouter()
@@ -60,10 +60,7 @@ def _require_restaurant(current_user: User, db: Session) -> Restaurant:
     if not restaurant_id:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User is not associated with a restaurant. Create or join a restaurant first.")
 
-    restaurant = db.query(Restaurant).filter(
-        Restaurant.restaurant_id == restaurant_id,
-        Restaurant.active.is_(True),
-    ).first()
+    restaurant = db.query(Restaurant).filter(Restaurant.restaurant_id == restaurant_id, Restaurant.active.is_(True)).first()
     if restaurant is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Restaurant access is inactive or invalid.")
     return restaurant
