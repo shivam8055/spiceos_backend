@@ -27,12 +27,27 @@ class UserRoleUpdate(BaseModel):
 VALID_ROLES = {"owner", "manager", "staff"}
 
 
+def _require_owner_restaurant(current_user: User) -> str:
+    if not current_user.restaurant_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Owner is not associated with a restaurant.",
+        )
+    return current_user.restaurant_id
+
+
 @router.get("/", response_model=list[UserAdminResponse])
 def list_users(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_owner),
 ):
-    return db.query(User).order_by(User.created_at.asc(), User.id.asc()).all()
+    restaurant_id = _require_owner_restaurant(current_user)
+    return (
+        db.query(User)
+        .filter(User.restaurant_id == restaurant_id)
+        .order_by(User.created_at.asc(), User.id.asc())
+        .all()
+    )
 
 
 @router.patch("/{user_id}/role", response_model=UserAdminResponse)
@@ -42,6 +57,7 @@ def update_user_role(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_owner),
 ):
+    restaurant_id = _require_owner_restaurant(current_user)
     role = payload.role.strip().lower()
     if role not in VALID_ROLES:
         raise HTTPException(
@@ -49,12 +65,13 @@ def update_user_role(
             detail="Invalid role. Allowed roles: owner, manager, staff.",
         )
 
-    user = db.query(User).filter(User.id == user_id).first()
+    user = (
+        db.query(User)
+        .filter(User.id == user_id, User.restaurant_id == restaurant_id)
+        .first()
+    )
     if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found.",
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
 
     if user.id == current_user.id and role != "owner":
         raise HTTPException(
@@ -75,12 +92,14 @@ def update_user_status(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_owner),
 ):
-    user = db.query(User).filter(User.id == user_id).first()
+    restaurant_id = _require_owner_restaurant(current_user)
+    user = (
+        db.query(User)
+        .filter(User.id == user_id, User.restaurant_id == restaurant_id)
+        .first()
+    )
     if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found.",
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
 
     if user.id == current_user.id and not is_active:
         raise HTTPException(
