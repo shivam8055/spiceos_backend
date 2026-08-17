@@ -1,0 +1,58 @@
+{
+  "restaurant_id": "spice-box",
+  "branch_id": "main",
+  "currency": "INR",
+  "source": "User-provided Spice Box Cloud Kitchen menu image",
+  "categories": [
+    {"name":"Starters","items":[
+      {"name":"French Fries","price":49},{"name":"Peri Peri Fries","price":59},{"name":"Honey Chilli Potato","price":79},{"name":"Chicken Popcorn","price":89},{"name":"Paneer Tikka","price":109},{"name":"Chicken Tandoori (Half)","price":139},{"name":"Chicken Tandoori (Full)","price":239},{"name":"Chicken Lollipop (6 pcs)","price":249},{"name":"Chicken Wings (6 pcs)","price":249}
+    ]},
+    {"name":"Soups","items":[
+      {"name":"Veg Manchow Soup","price":59},{"name":"Chicken Manchow Soup","price":79},{"name":"Hot & Sour Soup","price":59},{"name":"Sweet Corn Chicken Soup","price":79},{"name":"Classic Chicken Soup","price":89}
+    ]},
+    {"name":"Burgers & Rolls","items":[
+      {"name":"Veg Burger","price":59},{"name":"Paneer Tikka Burger","price":79},{"name":"Chicken Classic Burger","price":79},{"name":"Jumbo Chicken Burger","price":99},{"name":"Veg Roll","price":39},{"name":"Paneer Roll","price":59},{"name":"Egg Roll","price":49},{"name":"Chicken Roll","price":69},{"name":"Double Chicken Roll","price":89}
+    ]},
+    {"name":"Indian Breads","items":[
+      {"name":"Tawa Roti","price":10},{"name":"Tandoori Roti","price":12},{"name":"Butter Naan","price":20},{"name":"Tandoori Butter Roti","price":25},{"name":"Butter Garlic Naan","price":30},{"name":"Lachha Paratha","price":30},{"name":"Aloo Paratha","price":39}
+    ]},
+    {"name":"Tandoori Specials","items":[
+      {"name":"Paneer Tikka","price":119},{"name":"Chicken Tikka","price":149},{"name":"Chicken Malai Tikka","price":169},{"name":"Chicken Reshmi Tikka","price":169},{"name":"Tandoori Chicken (Half)","price":139},{"name":"Tandoori Chicken (Full)","price":239},{"name":"Seekh Kebab","price":139},{"name":"Hariyali Kebab","price":139}
+    ]},
+    {"name":"Biryani & Rice","items":[
+      {"name":"Veg Biryani","price":99},{"name":"Egg Biryani","price":109},{"name":"Chicken Biryani","price":139},{"name":"Veg Fried Rice","price":89},{"name":"Egg Fried Rice","price":99},{"name":"Chicken Fried Rice","price":119},{"name":"Jeera Rice","price":59},{"name":"Steam Rice","price":39}
+    ]},
+    {"name":"Chef's Special","items":[
+      {"name":"Butter Chicken + Butter Garlic Naan","price":149},{"name":"Chicken Lollipop","price":219},{"name":"Chicken Chilli Boneless","price":239},{"name":"Paneer Butter Masala","price":149},{"name":"Oreo Shake","price":99},{"name":"Brownie with Ice Cream","price":99}
+    ]},
+    {"name":"Main Course","items":[
+      {"name":"Egg Curry","price":89},{"name":"Mushroom Masala","price":109},{"name":"Paneer Curry","price":119},{"name":"Chicken Curry","price":129},{"name":"Kadai Paneer","price":149},{"name":"Dal Makhani","price":109},{"name":"Paneer Butter Masala","price":149},{"name":"Butter Chicken","price":159}
+    ]},
+    {"name":"Momos","items":[
+      {"name":"Veg Steamed Momos","price":69},{"name":"Veg Chilli Momos","price":89},{"name":"Veg Kurkure Momos","price":99},{"name":"Veg Afghani Momos","price":109},{"name":"Chicken Steamed Momos","price":99},{"name":"Chicken Chilli Momos","price":119},{"name":"Chicken Kurkure Momos","price":129},{"name":"Chicken Afghani Momos","price":149}
+    ]},
+    {"name":"Chinese Specials","items":[
+      {"name":"Veg Hakka Noodles","price":79},{"name":"Egg Noodles","price":89},{"name":"Chicken Hakka Noodles","price":99},{"name":"Veg Fried Rice","price":89},{"name":"Egg Fried Rice","price":99},{"name":"Chicken Fried Rice","price":109},{"name":"Paneer Chilli","price":119},{"name":"Chicken Chilli (Bone)","price":139},{"name":"Chicken Chilli (Boneless)","price":159},{"name":"Chicken Manchurian Dry","price":109},{"name":"Veg Manchurian Dry","price":119},{"name":"Veg Manchurian Gravy","price":129}
+    ]},
+    {"name":"Street Food","items":[
+      {"name":"Chilli Paneer","price":119},{"name":"Chilli Chicken","price":129},{"name":"Veg Spring Roll (6 pcs)","price":89},{"name":"Chicken Spring Roll (6 pcs)","price":109},{"name":"Chicken Shawarma Roll","price":129},{"name":"Crispy Corn (Salt & Pepper)","price":89},{"name":"Garlic Bread with Cheese","price":89}
+    ]},
+    {"name":"Snacks","items":[
+      {"name":"Masala Papad","price":19},{"name":"French Fries","price":49},{"name":"Cheese Corn Nuggets","price":79},{"name":"Veg Nuggets","price":69},{"name":"Onion Rings","price":59}
+    ]},
+    {"name":"Beverages","groups":[
+      {"name":"Fresh Juices","items":[{"name":"Mosambi Juice","price":39},{"name":"Pineapple Juice","price":39},{"name":"Mixed Fruit Juice","price":49}]},
+      {"name":"Coolers","items":[{"name":"Virgin Mojito","price":59},{"name":"Cold Coffee","price":69},{"name":"Mint Cooler","price":59},{"name":"Lime Soda","price":49}]},
+      {"name":"Premium Shakes","items":[{"name":"Vanilla Shake","price":69},{"name":"Chocolate Shake","price":79},{"name":"Strawberry Shake","price":79},{"name":"Oreo Shake","price":89},{"name":"KitKat Shake","price":99}]}
+    ]},
+    {"name":"Salads & Raita","items":[
+      {"name":"Onion Salad","price":19},{"name":"Green Salad","price":29},{"name":"Fruit Salad","price":49},{"name":"Boondi Raita","price":29},{"name":"Mix Veg Raita","price":29}
+    ]}
+  ],
+  "notes": [
+    "Menu transcription is based on the supplied image and should be reviewed before production activation.",
+    "The image shows highlighted/starred best-seller items; this fixture preserves item names and prices but does not encode the star marker as a business rule.",
+    "Extra Dip is shown at ₹15 in the source menu and should be modeled as a modifier/add-on after the restaurant confirms the applicable items.",
+    "Tandoori items in the source image include serving notes such as mint chutney and salad; these are not represented as price-bearing modifiers in this fixture."
+  ]
+}
