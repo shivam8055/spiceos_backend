@@ -78,10 +78,16 @@ def ensure_payment_schema(engine) -> None:
                 ")"
             ))
         else:
-            # Older releases allowed only one payment attempt per order.
-            # Remove that uniqueness so a failed Razorpay attempt can be retried
-            # without losing the old provider order for webhook reconciliation.
-            connection.execute(text("DROP INDEX IF EXISTS uq_payments_order_id"))
+            # Older releases used a unique constraint/index on order_id.
+            # On PostgreSQL a constraint owns its backing index, so dropping
+            # the index directly crashes startup. Drop the constraint when it
+            # exists, otherwise drop the legacy standalone index.
+            if dialect == "postgresql":
+                connection.execute(text(
+                    "ALTER TABLE payments DROP CONSTRAINT IF EXISTS uq_payments_order_id"
+                ))
+            else:
+                connection.execute(text("DROP INDEX IF EXISTS uq_payments_order_id"))
 
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_payments_order_id ON payments(order_id)"))
         connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_provider_order_id ON payments(provider_order_id)"))
