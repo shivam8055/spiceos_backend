@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 
+import pytest
 from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
