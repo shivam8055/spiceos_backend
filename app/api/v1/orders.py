@@ -174,6 +174,11 @@ def update_order(
                 status_code=409,
                 detail="QR orders must be paid before kitchen preparation can start.",
             )
+        if current_status == "created" and next_status == "preparing":
+            # This is the authoritative kitchen start time. It is written once
+            # when the order actually enters preparation and is never reset by
+            # polling, browser refreshes, or later status transitions.
+            order.preparing_at = datetime.utcnow()
         order.status = next_status
 
     if "payment_status" in updates:
