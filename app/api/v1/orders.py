@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.api.dependencies import require_manager, require_staff
 from app.core.database import get_db
 from app.models.order import Order
+from app.models.payment import Payment
 from app.models.restaurant import Restaurant
 from app.models.user import User
 from app.schemas.order import OrderCreate, OrderResponse, OrderUpdate
@@ -63,9 +64,35 @@ def _ensure_order_defaults(order: Order) -> None:
         order.order_source = "Unknown"
 
 
-def _serialize_order(order: Order) -> OrderResponse:
+def _serialize_order(order: Order, transaction_code: str | None = None) -> OrderResponse:
     _ensure_order_defaults(order)
-    return OrderResponse.model_validate(order)
+    response = OrderResponse.model_validate(order)
+    return response.model_copy(update={"transaction_code": transaction_code})
+
+
+def _latest_transaction_codes(db: Session, order_ids: list[int]) -> dict[int, str]:
+    if not order_ids:
+        return {}
+    payments = (
+        db.query(Payment)
+        .filter(Payment.order_id.in_(order_ids), Payment.provider_payment_id.is_not(None))
+        .order_by(Payment.created_at.desc(), Payment.id.desc())
+        .all()
+    )
+    codes: dict[int, str] = {}
+    for payment in payments:
+        codes.setdefault(payment.order_id, payment.provider_payment_id)
+    return codes
+
+
+def _latest_transaction_code(db: Session, order_id: int) -> str | None:
+    payment = (
+        db.query(Payment)
+        .filter(Payment.order_id == order_id, Payment.provider_payment_id.is_not(None))
+        .order_by(Payment.created_at.desc(), Payment.id.desc())
+        .first()
+    )
+    return payment.provider_payment_id if payment else None
 
 
 @router.get("/", response_model=list[OrderResponse])
@@ -97,7 +124,8 @@ def get_orders(
         )
     if changed:
         db.commit()
-    return [_serialize_order(order) for order in orders]
+    transaction_codes = _latest_transaction_codes(db, [order.id for order in orders])
+    return [_serialize_order(order, transaction_codes.get(order.id)) for order in orders]
 
 
 @router.post("/", response_model=OrderResponse, status_code=status.HTTP_201_CREATED)
@@ -129,7 +157,7 @@ def create_order(
     db.add(new_order)
     db.commit()
     db.refresh(new_order)
-    return _serialize_order(new_order)
+    return _serialize_order(new_order, _latest_transaction_code(db, new_order.id))
 
 
 @router.patch("/{order_id}", response_model=OrderResponse)
@@ -179,6 +207,10 @@ def update_order(
             # when the order actually enters preparation and is never reset by
             # polling, browser refreshes, or later status transitions.
             order.preparing_at = datetime.utcnow()
+        if current_status == "outForDelivery" and next_status == "delivered":
+            # Authoritative delivery completion time used for the total order
+            # turnaround metric shown in the Orders tab.
+            order.delivered_at = datetime.utcnow()
         order.status = next_status
 
     if "payment_status" in updates:
@@ -217,4 +249,4 @@ def update_order(
     _ensure_order_defaults(order)
     db.commit()
     db.refresh(order)
-    return _serialize_order(order)
+    return _serialize_order(order, _latest_transaction_code(db, order.id))
