@@ -32,6 +32,7 @@ class OrderResponse(BaseModel):
     customer_name: str
     primary_item: str | None
     created_at: datetime
+    preparing_at: datetime | None
     status: str
     payment_status: str
     total: float
