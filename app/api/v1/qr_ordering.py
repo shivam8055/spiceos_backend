@@ -4,6 +4,7 @@ import secrets
 import uuid
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile, status
+from sqlalchemy import inspect as sqlalchemy_inspect
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import require_staff
@@ -34,7 +35,15 @@ router = APIRouter()
 
 
 def _managed_user(current_user: User, db: Session) -> User:
-    user = db.query(User).filter(User.id == current_user.id).first()
+    # require_staff may return a detached/expired SQLAlchemy instance because
+    # authentication and request handling can use different DB sessions.
+    # Read the identity from SQLAlchemy state without triggering lazy loading,
+    # then resolve the canonical user in the active request session.
+    identity = sqlalchemy_inspect(current_user).identity
+    user_id = identity[0] if identity else current_user.__dict__.get("id")
+    if user_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authenticated user identity is unavailable.")
+    user = db.query(User).filter(User.id == user_id).first()
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authenticated user profile no longer exists.")
     return user
