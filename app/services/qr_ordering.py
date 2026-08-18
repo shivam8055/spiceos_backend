@@ -44,12 +44,18 @@ def resolve_qr_table(db: Session, token: str) -> QRTable:
     return table
 
 
-def parse_modifiers(item: MenuItem) -> list[dict]:
-    """Return only well-formed modifier objects from persisted menu data.
+def _safe_modifier_price(value: object) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
 
-    Menu data can be imported or edited outside the QR flow. A malformed
-    modifier entry must never take down the public menu endpoint; invalid
-    entries are ignored and valid entries remain available to customers.
+
+def parse_modifiers(item: MenuItem) -> list[dict]:
+    """Return only safe modifier objects from persisted menu data.
+
+    Menu data can be imported or edited outside the QR flow. Malformed
+    modifier entries must never take down the public menu endpoint.
     """
     try:
         modifiers = json.loads(item.modifiers_json or "[]")
@@ -57,7 +63,20 @@ def parse_modifiers(item: MenuItem) -> list[dict]:
         return []
     if not isinstance(modifiers, list):
         return []
-    return [modifier for modifier in modifiers if isinstance(modifier, dict)]
+
+    safe_modifiers = []
+    for modifier in modifiers:
+        if not isinstance(modifier, dict) or modifier.get("id") is None:
+            continue
+        safe_modifiers.append(
+            {
+                "id": str(modifier["id"]),
+                "name": str(modifier.get("name", "")),
+                "price_delta": _safe_modifier_price(modifier.get("price_delta", 0)),
+                "available": bool(modifier.get("available", True)),
+            }
+        )
+    return safe_modifiers
 
 
 def menu_response(db: Session, table: QRTable) -> QRMenuResponse:
@@ -71,13 +90,12 @@ def menu_response(db: Session, table: QRTable) -> QRMenuResponse:
     for item in items:
         modifiers = [
             QRModifierResponse(
-                id=str(modifier.get("id")),
-                name=str(modifier.get("name", "")),
-                price_delta=float(modifier.get("price_delta", 0)),
-                available=bool(modifier.get("available", True)),
+                id=modifier["id"],
+                name=modifier["name"],
+                price_delta=modifier["price_delta"],
+                available=modifier["available"],
             )
             for modifier in parse_modifiers(item)
-            if modifier.get("id") is not None
         ]
         response_items.append(
             QRMenuItemResponse(
@@ -149,7 +167,7 @@ def create_qr_order(db: Session, table: QRTable, payload: QROrderCreateRequest, 
             modifier = modifiers_by_id.get(str(modifier_id))
             if modifier is None or not bool(modifier.get("available", True)):
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"A selected modifier for {item.name} is unavailable.")
-            delta = float(modifier.get("price_delta", 0))
+            delta = _safe_modifier_price(modifier.get("price_delta", 0))
             modifier_delta += delta
             selected_modifiers.append({"id": str(modifier_id), "name": str(modifier.get("name", "")), "price_delta": delta})
         unit_price = float(item.price) + modifier_delta
