@@ -45,11 +45,19 @@ def resolve_qr_table(db: Session, token: str) -> QRTable:
 
 
 def parse_modifiers(item: MenuItem) -> list[dict]:
+    """Return only well-formed modifier objects from persisted menu data.
+
+    Menu data can be imported or edited outside the QR flow. A malformed
+    modifier entry must never take down the public menu endpoint; invalid
+    entries are ignored and valid entries remain available to customers.
+    """
     try:
         modifiers = json.loads(item.modifiers_json or "[]")
-        return modifiers if isinstance(modifiers, list) else []
     except (TypeError, ValueError):
         return []
+    if not isinstance(modifiers, list):
+        return []
+    return [modifier for modifier in modifiers if isinstance(modifier, dict)]
 
 
 def menu_response(db: Session, table: QRTable) -> QRMenuResponse:
