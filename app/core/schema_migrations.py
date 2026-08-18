@@ -12,6 +12,7 @@ def ensure_order_columns(engine) -> None:
         "customer_id": "VARCHAR",
         "primary_item": "VARCHAR",
         "created_at": "TIMESTAMP",
+        "preparing_at": "TIMESTAMP",
         "status": "VARCHAR",
         "payment_status": "VARCHAR",
         "order_source": "VARCHAR",
@@ -29,6 +30,15 @@ def ensure_order_columns(engine) -> None:
         connection.execute(text("UPDATE orders SET status = 'created' WHERE status IS NULL"))
         connection.execute(text("UPDATE orders SET payment_status = 'pending' WHERE payment_status IS NULL"))
         connection.execute(text("UPDATE orders SET order_source = 'Unknown' WHERE order_source IS NULL"))
+        # Existing orders already in or beyond preparation have no historical
+        # kitchen-start timestamp. Use created_at as a safe one-time fallback;
+        # all newly started orders receive the real server timestamp.
+        connection.execute(text(
+            "UPDATE orders "
+            "SET preparing_at = created_at "
+            "WHERE preparing_at IS NULL "
+            "AND status IN ('preparing', 'ready', 'outForDelivery', 'delivered')"
+        ))
         if "qr_tables" in inspector.get_table_names():
             connection.execute(text(
                 "UPDATE orders "
@@ -36,6 +46,7 @@ def ensure_order_columns(engine) -> None:
                 "WHERE restaurant_id IS NULL AND qr_table_id IS NOT NULL"
             ))
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_orders_restaurant_id ON orders(restaurant_id)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_orders_preparing_at ON orders(preparing_at)"))
         connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_orders_idempotency_key ON orders(idempotency_key)"))
         connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_orders_public_token_hash ON orders(public_token_hash)"))
 
