@@ -13,6 +13,7 @@ def ensure_order_columns(engine) -> None:
         "primary_item": "VARCHAR",
         "created_at": "TIMESTAMP",
         "preparing_at": "TIMESTAMP",
+        "delivered_at": "TIMESTAMP",
         "status": "VARCHAR",
         "payment_status": "VARCHAR",
         "order_source": "VARCHAR",
@@ -47,6 +48,7 @@ def ensure_order_columns(engine) -> None:
             ))
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_orders_restaurant_id ON orders(restaurant_id)"))
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_orders_preparing_at ON orders(preparing_at)"))
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_orders_delivered_at ON orders(delivered_at)"))
         connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_orders_idempotency_key ON orders(idempotency_key)"))
         connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_orders_public_token_hash ON orders(public_token_hash)"))
 
@@ -89,10 +91,6 @@ def ensure_payment_schema(engine) -> None:
                 ")"
             ))
         else:
-            # Older releases used a unique constraint/index on order_id.
-            # On PostgreSQL a constraint owns its backing index, so dropping
-            # the index directly crashes startup. Drop the constraint when it
-            # exists, otherwise drop the legacy standalone index.
             if dialect == "postgresql":
                 connection.execute(text(
                     "ALTER TABLE payments DROP CONSTRAINT IF EXISTS uq_payments_order_id"
