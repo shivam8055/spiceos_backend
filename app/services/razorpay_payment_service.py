@@ -45,8 +45,15 @@ def create_qr_payment(db: Session, order: Order) -> dict:
     if order.payment_status == "refunded":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This order has already been refunded.")
 
-    existing = db.query(Payment).filter(Payment.order_id == order.id).first()
-    if existing is not None:
+    # Reuse an active attempt. Failed attempts are retained for webhook
+    # reconciliation, while a new Razorpay order is created for a retry.
+    existing = (
+        db.query(Payment)
+        .filter(Payment.order_id == order.id)
+        .order_by(Payment.created_at.desc(), Payment.id.desc())
+        .first()
+    )
+    if existing is not None and existing.status not in {"failed", "refunded"}:
         return payment_response(existing, order)
 
     amount_paise = int(round(float(order.total) * 100))
@@ -108,7 +115,11 @@ def create_qr_payment(db: Session, order: Order) -> dict:
         db.commit()
     except IntegrityError:
         db.rollback()
-        existing = db.query(Payment).filter(Payment.order_id == order.id).first()
+        existing = (
+            db.query(Payment)
+            .filter(Payment.provider_order_id == provider_order_id)
+            .first()
+        )
         if existing is None:
             raise
         return payment_response(existing, order)
@@ -118,31 +129,29 @@ def create_qr_payment(db: Session, order: Order) -> dict:
 
 def verify_checkout_signature(db: Session, order: Order, provider_order_id: str, provider_payment_id: str, signature: str) -> Payment:
     _require_credentials()
-    payment = db.query(Payment).filter(Payment.order_id == order.id).first()
-    if payment is None or payment.provider_order_id != provider_order_id:
+    payment = (
+        db.query(Payment)
+        .filter(Payment.order_id == order.id, Payment.provider_order_id == provider_order_id)
+        .first()
+    )
+    if payment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Payment order not found.")
     if payment.provider != "razorpay":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Unsupported payment provider.")
-
-    # The Razorpay webhook is authoritative for capture. A checkout callback
-    # may arrive after that webhook, so already-paid callbacks are idempotent.
-    # Authentication is still mandatory: the callback must reference the exact
-    # captured payment ID and carry a valid Razorpay checkout signature.
-    if payment.status == "paid" or order.payment_status == "paid":
-        if payment.provider_payment_id != provider_payment_id:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Payment callback does not match the captured payment.")
-        message = f"{payment.provider_order_id}|{provider_payment_id}".encode("utf-8")
-        expected = hmac.new(RAZORPAY_KEY_SECRET.encode("utf-8"), message, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(expected, signature):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payment signature.")
-        return payment
-    if order.payment_status == "refunded":
+    if payment.status == "failed":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This payment attempt has already failed. Please start a new payment attempt.")
+    if payment.status == "refunded" or order.payment_status == "refunded":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This order has already been refunded.")
 
     message = f"{payment.provider_order_id}|{provider_payment_id}".encode("utf-8")
     expected = hmac.new(RAZORPAY_KEY_SECRET.encode("utf-8"), message, hashlib.sha256).hexdigest()
     if not hmac.compare_digest(expected, signature):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid payment signature.")
+
+    if payment.status == "paid" or order.payment_status == "paid":
+        if payment.provider_payment_id != provider_payment_id:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Payment callback does not match the captured payment.")
+        return payment
 
     payment.provider_payment_id = provider_payment_id
     payment.status = "verified"
@@ -189,11 +198,15 @@ def process_webhook(db: Session, raw_body: bytes, signature: str, event_id: str)
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Invalid refund amount.")
         payment.provider_status = refund_entity.get("status") or event
         payment.webhook_event_id = event_id
-        payment.status = "refunded"
-        payment.refunded_at = payment.refunded_at or datetime.utcnow()
         order = db.query(Order).filter(Order.id == payment.order_id).first()
-        if order is not None:
-            order.payment_status = "refunded"
+        if amount == payment.amount_paise:
+            payment.status = "refunded"
+            payment.refunded_at = payment.refunded_at or datetime.utcnow()
+            if order is not None:
+                order.payment_status = "refunded"
+        else:
+            # A partial refund does not make the order fully refunded.
+            payment.status = "paid"
         db.commit()
         return
 
@@ -215,9 +228,6 @@ def process_webhook(db: Session, raw_body: bytes, signature: str, event_id: str)
         payment.last_error = "Provider amount or currency did not match the local payment."
         db.commit()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Payment amount or currency mismatch.")
-
-    if order.payment_status == "paid" and event in {"payment.captured", "order.paid"}:
-        return
 
     payment.provider_payment_id = provider_payment_id or payment.provider_payment_id
     payment.provider_status = payment_entity.get("status")

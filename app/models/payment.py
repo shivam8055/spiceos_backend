@@ -8,7 +8,6 @@ from app.core.database import Base
 class Payment(Base):
     __tablename__ = "payments"
     __table_args__ = (
-        UniqueConstraint("order_id", name="uq_payments_order_id"),
         UniqueConstraint("provider_order_id", name="uq_payments_provider_order_id"),
         UniqueConstraint("provider_payment_id", name="uq_payments_provider_payment_id"),
         UniqueConstraint("webhook_event_id", name="uq_payments_webhook_event_id"),
