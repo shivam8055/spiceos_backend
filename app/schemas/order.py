@@ -33,7 +33,9 @@ class OrderResponse(BaseModel):
     primary_item: str | None
     created_at: datetime
     preparing_at: datetime | None
+    delivered_at: datetime | None
     status: str
     payment_status: str
     total: float
     order_source: str
+    transaction_code: str | None = None
