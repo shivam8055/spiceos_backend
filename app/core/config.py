@@ -31,11 +31,16 @@ PUBLIC_QR_BASE_URL = os.getenv(
 
 # The QR signing secret must be stable in production. Keep a development
 # fallback for local work, but never allow a known default secret to be used
-# by a production deployment.
+# by a production deployment. Railway exposes RAILWAY_PROJECT_ID, so Railway
+# deployments are treated as production unless an explicit development/test
+# environment is selected.
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development").strip().lower()
+IS_PRODUCTION = ENVIRONMENT in {"production", "prod"} or bool(
+    os.getenv("RAILWAY_PROJECT_ID")
+)
 QR_PUBLIC_TOKEN_SECRET = os.getenv("QR_PUBLIC_TOKEN_SECRET")
 if not QR_PUBLIC_TOKEN_SECRET:
-    if ENVIRONMENT in {"production", "prod"}:
+    if IS_PRODUCTION:
         raise RuntimeError(
             "QR_PUBLIC_TOKEN_SECRET must be configured in production"
         )
