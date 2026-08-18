@@ -29,9 +29,16 @@ PUBLIC_QR_BASE_URL = os.getenv(
     "https://app.spiceos.co.in/#/order",
 )
 
+# The QR signing secret must be stable in production. Keep a development
+# fallback for local work, but never allow a known default secret to be used
+# by a production deployment.
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development").strip().lower()
 QR_PUBLIC_TOKEN_SECRET = os.getenv("QR_PUBLIC_TOKEN_SECRET")
 if not QR_PUBLIC_TOKEN_SECRET:
-    # Development fallback only. Production deployments must provide a stable secret.
+    if ENVIRONMENT in {"production", "prod"}:
+        raise RuntimeError(
+            "QR_PUBLIC_TOKEN_SECRET must be configured in production"
+        )
     QR_PUBLIC_TOKEN_SECRET = "spiceos-dev-qr-token-secret"
 
 RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
