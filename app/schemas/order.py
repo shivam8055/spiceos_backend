@@ -33,6 +33,8 @@ class OrderResponse(BaseModel):
     primary_item: str | None
     created_at: datetime
     preparing_at: datetime | None
+    ready_at: datetime | None
+    out_for_delivery_at: datetime | None
     delivered_at: datetime | None
     status: str
     payment_status: str
