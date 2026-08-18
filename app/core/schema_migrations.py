@@ -77,11 +77,16 @@ def ensure_payment_schema(engine) -> None:
                 "refunded_at TIMESTAMP"
                 ")"
             ))
-        connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_order_id ON payments(order_id)"))
+        else:
+            # Older releases allowed only one payment attempt per order.
+            # Remove that uniqueness so a failed Razorpay attempt can be retried
+            # without losing the old provider order for webhook reconciliation.
+            connection.execute(text("DROP INDEX IF EXISTS uq_payments_order_id"))
+
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_payments_order_id ON payments(order_id)"))
         connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_provider_order_id ON payments(provider_order_id)"))
         connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_provider_payment_id ON payments(provider_payment_id)"))
         connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_payments_webhook_event_id ON payments(webhook_event_id)"))
-        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_payments_order_id ON payments(order_id)"))
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_payments_provider_order_id ON payments(provider_order_id)"))
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_payments_provider_payment_id ON payments(provider_payment_id)"))
         connection.execute(text("CREATE INDEX IF NOT EXISTS ix_payments_status ON payments(status)"))
