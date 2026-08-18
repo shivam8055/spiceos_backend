@@ -202,15 +202,15 @@ def update_order(
                 status_code=409,
                 detail="QR orders must be paid before kitchen preparation can start.",
             )
-        if current_status == "created" and next_status == "preparing":
-            # This is the authoritative kitchen start time. It is written once
-            # when the order actually enters preparation and is never reset by
-            # polling, browser refreshes, or later status transitions.
-            order.preparing_at = datetime.utcnow()
-        if current_status == "outForDelivery" and next_status == "delivered":
-            # Authoritative delivery completion time used for the total order
-            # turnaround metric shown in the Orders tab.
-            order.delivered_at = datetime.utcnow()
+        now = datetime.utcnow()
+        if current_status == "created" and next_status == "preparing" and order.preparing_at is None:
+            order.preparing_at = now
+        if current_status == "preparing" and next_status == "ready" and order.ready_at is None:
+            order.ready_at = now
+        if current_status == "ready" and next_status == "outForDelivery" and order.out_for_delivery_at is None:
+            order.out_for_delivery_at = now
+        if current_status == "outForDelivery" and next_status == "delivered" and order.delivered_at is None:
+            order.delivered_at = now
         order.status = next_status
 
     if "payment_status" in updates:
