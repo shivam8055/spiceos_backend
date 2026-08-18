@@ -65,6 +65,16 @@ class MenuItemCreateRequest(BaseModel):
     modifiers: list[MenuModifierInput] = Field(default_factory=list, max_length=50)
 
 
+class MenuItemUpdateRequest(BaseModel):
+    branch_id: str | None = Field(default=None, min_length=1, max_length=100)
+    category: str | None = Field(default=None, min_length=1, max_length=100)
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = Field(default=None, max_length=1000)
+    price: float | None = Field(default=None, ge=0)
+    available: bool | None = None
+    modifiers: list[MenuModifierInput] | None = Field(default=None, max_length=50)
+
+
 class MenuItemResponse(BaseModel):
     id: int
     restaurant_id: str
