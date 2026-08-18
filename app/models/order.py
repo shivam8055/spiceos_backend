@@ -16,6 +16,7 @@ class Order(Base):
     customer_phone = Column(String, nullable=True)
     primary_item = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=True, default=datetime.utcnow, index=True)
+    preparing_at = Column(DateTime, nullable=True, index=True)
     status = Column(String, nullable=True, default="created", index=True)
     payment_status = Column(String, nullable=True, default="pending")
     total = Column(Float, nullable=False)
