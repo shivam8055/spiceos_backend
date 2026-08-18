@@ -153,7 +153,7 @@ def test_qr_order_cannot_start_preparation_before_payment():
     assert "must be paid" in exc.value.detail
 
 
-def test_paid_qr_order_can_start_preparation():
+def test_paid_qr_order_can_start_preparation_and_records_server_time():
     db, _, manager, _ = seed()
     order = Order(
         order_number="QR-103",
@@ -167,6 +167,32 @@ def test_paid_qr_order_can_start_preparation():
     db.add(order)
     db.commit()
 
+    assert order.preparing_at is None
     response = update_order(order.id, OrderUpdate(status="preparing"), db=db, current_user=manager)
 
     assert response.status == "preparing"
+    assert response.preparing_at is not None
+    assert response.preparing_at >= order.created_at
+
+
+def test_preparation_start_time_is_not_reset_by_later_status_updates():
+    db, _, manager, _ = seed()
+    order = Order(
+        order_number="QR-104",
+        restaurant_id="restaurant-a",
+        customer_name="QR Guest",
+        total=249,
+        status="created",
+        payment_status="paid",
+        order_source="qr_table",
+    )
+    db.add(order)
+    db.commit()
+
+    started = update_order(order.id, OrderUpdate(status="preparing"), db=db, current_user=manager)
+    preparing_at = started.preparing_at
+
+    ready = update_order(order.id, OrderUpdate(status="ready"), db=db, current_user=manager)
+
+    assert ready.status == "ready"
+    assert ready.preparing_at == preparing_at
