@@ -196,3 +196,33 @@ def test_preparation_start_time_is_not_reset_by_later_status_updates():
 
     assert ready.status == "ready"
     assert ready.preparing_at == preparing_at
+    assert ready.ready_at is not None
+
+
+def test_full_status_timeline_records_each_transition_once():
+    db, _, manager, _ = seed()
+    order = Order(
+        order_number="QR-105",
+        restaurant_id="restaurant-a",
+        customer_name="QR Guest",
+        total=249,
+        status="created",
+        payment_status="paid",
+        order_source="qr_table",
+    )
+    db.add(order)
+    db.commit()
+
+    preparing = update_order(order.id, OrderUpdate(status="preparing"), db=db, current_user=manager)
+    preparing_at = preparing.preparing_at
+    ready = update_order(order.id, OrderUpdate(status="ready"), db=db, current_user=manager)
+    ready_at = ready.ready_at
+    out = update_order(order.id, OrderUpdate(status="outForDelivery"), db=db, current_user=manager)
+    out_at = out.out_for_delivery_at
+    delivered = update_order(order.id, OrderUpdate(status="delivered"), db=db, current_user=manager)
+
+    assert delivered.preparing_at == preparing_at
+    assert delivered.ready_at == ready_at
+    assert delivered.out_for_delivery_at == out_at
+    assert delivered.delivered_at is not None
+    assert delivered.preparing_at <= delivered.ready_at <= delivered.out_for_delivery_at <= delivered.delivered_at
