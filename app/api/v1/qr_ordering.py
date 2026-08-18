@@ -20,6 +20,7 @@ from app.schemas.qr_admin import (
     MenuItemCreateRequest,
     MenuItemCreateResponse,
     MenuItemResponse,
+    MenuItemUpdateRequest,
     QRTableCreateRequest,
     QRTableCreateResponse,
     QRTableListResponse,
@@ -35,10 +36,6 @@ router = APIRouter()
 
 
 def _managed_user(current_user: User, db: Session) -> User:
-    # require_staff may return a detached/expired SQLAlchemy instance because
-    # authentication and request handling can use different DB sessions.
-    # Read the identity from SQLAlchemy state without triggering lazy loading,
-    # then resolve the canonical user in the active request session.
     identity = sqlalchemy_inspect(current_user).identity
     user_id = identity[0] if identity else current_user.__dict__.get("id")
     if user_id is None:
@@ -65,10 +62,8 @@ def _require_restaurant(current_user: User, db: Session) -> Restaurant:
             db.commit()
             db.refresh(managed_user)
             restaurant_id = managed_user.restaurant_id
-
     if not restaurant_id:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User is not associated with a restaurant. Create or join a restaurant first.")
-
     restaurant = db.query(Restaurant).filter(Restaurant.restaurant_id == restaurant_id, Restaurant.active.is_(True)).first()
     if restaurant is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Restaurant access is inactive or invalid.")
@@ -78,6 +73,24 @@ def _require_restaurant(current_user: User, db: Session) -> Restaurant:
 def _validate_tenant_payload(payload_restaurant_id: str, restaurant: Restaurant) -> None:
     if payload_restaurant_id.strip() != restaurant.restaurant_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot manage another restaurant's resources.")
+
+
+def _menu_item_response(item: MenuItem) -> MenuItemResponse:
+    try:
+        modifiers = json.loads(item.modifiers_json or "[]")
+    except (TypeError, json.JSONDecodeError):
+        modifiers = []
+    return MenuItemResponse(
+        id=item.id,
+        restaurant_id=item.restaurant_id,
+        branch_id=item.branch_id,
+        category=item.category,
+        name=item.name,
+        description=item.description,
+        price=float(item.price),
+        available=item.available,
+        modifiers=modifiers,
+    )
 
 
 @router.get("/public/qr/{token}/menu", response_model=QRMenuResponse)
@@ -172,14 +185,37 @@ def list_menu_items(restaurant_id: str, branch_id: str, db: Session = Depends(ge
     restaurant = _require_restaurant(current_user, db)
     _validate_tenant_payload(restaurant_id, restaurant)
     items = db.query(MenuItem).filter(MenuItem.restaurant_id == restaurant.restaurant_id, MenuItem.branch_id == branch_id.strip()).order_by(MenuItem.category.asc(), MenuItem.name.asc()).all()
-    result = []
-    for item in items:
-        try:
-            modifiers = json.loads(item.modifiers_json or "[]")
-        except (TypeError, json.JSONDecodeError):
-            modifiers = []
-        result.append(MenuItemResponse(id=item.id, restaurant_id=item.restaurant_id, branch_id=item.branch_id, category=item.category, name=item.name, description=item.description, price=float(item.price), available=item.available, modifiers=modifiers))
-    return result
+    return [_menu_item_response(item) for item in items]
+
+
+@router.patch("/admin/menu-items/{item_id}", response_model=MenuItemResponse)
+def update_menu_item(item_id: int, payload: MenuItemUpdateRequest, db: Session = Depends(get_db), current_user: User = Depends(require_staff)):
+    restaurant = _require_restaurant(current_user, db)
+    item = db.query(MenuItem).filter(MenuItem.id == item_id, MenuItem.restaurant_id == restaurant.restaurant_id).first()
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Menu item not found.")
+
+    updates = payload.model_dump(exclude_unset=True)
+    if not updates:
+        return _menu_item_response(item)
+    if "branch_id" in updates:
+        item.branch_id = updates["branch_id"].strip()
+    if "category" in updates:
+        item.category = updates["category"].strip()
+    if "name" in updates:
+        item.name = updates["name"].strip()
+    if "description" in updates:
+        item.description = updates["description"]
+    if "price" in updates:
+        item.price = updates["price"]
+    if "available" in updates:
+        item.available = updates["available"]
+    if "modifiers" in updates:
+        item.modifiers_json = json.dumps(updates["modifiers"], separators=(",", ":"))
+
+    db.commit()
+    db.refresh(item)
+    return _menu_item_response(item)
 
 
 @router.post("/admin/menu-import/preview", response_model=MenuImportPreviewResponse)
