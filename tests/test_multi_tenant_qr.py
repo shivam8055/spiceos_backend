@@ -3,10 +3,11 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.api.v1.qr_ordering import _require_restaurant, _validate_tenant_payload
+from app.api.v1.qr_ordering import _require_restaurant, _validate_tenant_payload, create_restaurant
 from app.core.database import Base
 from app.models.restaurant import Restaurant
 from app.models.user import User
+from app.schemas.qr_admin import RestaurantCreateRequest
 
 
 def make_db():
@@ -56,3 +57,22 @@ def test_cross_restaurant_resource_is_rejected():
     with pytest.raises(HTTPException) as exc:
         _validate_tenant_payload("other-restaurant", restaurant)
     assert exc.value.status_code == 403
+
+
+def test_create_restaurant_persists_user_association_from_detached_user():
+    db = make_db()
+    user = User(
+        firebase_uid="uid-3",
+        email="new-owner@example.com",
+        role="owner",
+        restaurant_id=None,
+    )
+    db.add(user)
+    db.commit()
+    db.expunge(user)
+
+    create_restaurant(RestaurantCreateRequest(name="Spice Box"), db, user)
+
+    refreshed = db.query(User).filter(User.firebase_uid == "uid-3").one()
+    assert refreshed.restaurant_id is not None
+    assert db.query(Restaurant).filter(Restaurant.restaurant_id == refreshed.restaurant_id).one().name == "Spice Box"
