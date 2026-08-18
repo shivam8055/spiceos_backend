@@ -10,7 +10,7 @@ from app.models.order import Order
 from app.models.order_item import OrderItem
 from app.models.qr_table import QRTable
 from app.schemas.qr_ordering import QROrderCreateRequest, QROrderItemRequest
-from app.services.qr_ordering import create_qr_order, get_public_order_status, hash_token, resolve_qr_table
+from app.services.qr_ordering import create_qr_order, get_public_order_status, hash_token, menu_response, resolve_qr_table
 
 
 def make_db():
@@ -115,3 +115,41 @@ def test_expired_qr_is_rejected():
         assert False, "expired QR must be rejected"
     except HTTPException as exc:
         assert exc.status_code == 404
+
+
+def test_qr_menu_and_order_cannot_cross_restaurant_boundaries():
+    db = make_db()
+    table_a = QRTable(
+        restaurant_id="restaurant-a",
+        branch_id="branch-1",
+        table_id="table-a",
+        table_name="A1",
+        session_id="session-a",
+        token_hash=hash_token("restaurant-a-token-1234567890"),
+        active=True,
+    )
+    table_b = QRTable(
+        restaurant_id="restaurant-b",
+        branch_id="branch-1",
+        table_id="table-b",
+        table_name="B1",
+        session_id="session-b",
+        token_hash=hash_token("restaurant-b-token-1234567890"),
+        active=True,
+    )
+    db.add_all([table_a, table_b])
+    db.add_all([
+        MenuItem(restaurant_id="restaurant-a", branch_id="branch-1", category="Mains", name="A Dish", price=100, available=True, modifiers_json="[]"),
+        MenuItem(restaurant_id="restaurant-b", branch_id="branch-1", category="Mains", name="B Dish", price=200, available=True, modifiers_json="[]"),
+    ])
+    db.commit()
+    db.refresh(table_a)
+    db.refresh(table_b)
+
+    menu_a = menu_response(db, table_a)
+    assert [item.name for item in menu_a.items] == ["A Dish"]
+
+    payload = QROrderCreateRequest(items=[QROrderItemRequest(menu_item_id=2, quantity=1)])
+    with pytest.raises(HTTPException) as exc:
+        create_qr_order(db, table_a, payload, "cross-tenant-key")
+    assert exc.value.status_code == 422
