@@ -118,6 +118,20 @@ def test_expired_qr_is_rejected():
         assert exc.status_code == 404
 
 
+def test_qr_menu_ignores_malformed_modifier_entries():
+    db = make_db()
+    table = seed_table(db)
+    item = db.query(MenuItem).filter(MenuItem.id == 1).one()
+    item.modifiers_json = '[null, "legacy", 123, {"id":"valid","name":"Valid","price_delta":10}]'
+    db.commit()
+
+    response = menu_response(db, table)
+
+    assert len(response.items) == 1
+    assert len(response.items[0].modifiers) == 1
+    assert response.items[0].modifiers[0].id == "valid"
+
+
 def test_qr_menu_and_order_cannot_cross_restaurant_boundaries():
     db = make_db()
     table_a = QRTable(
