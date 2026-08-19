@@ -21,6 +21,7 @@ class DeliveryCreate(BaseModel):
     customer_name: Optional[str] = Field(default=None, max_length=120)
     customer_phone: Optional[str] = Field(default=None, max_length=40)
     pickup_address: Optional[str] = Field(default=None, max_length=2000)
+    provider: str = Field(default="own_agent", min_length=1, max_length=40)
 
 
 class DeliveryAssign(BaseModel):
