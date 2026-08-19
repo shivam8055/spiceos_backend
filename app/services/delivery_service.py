@@ -6,9 +6,12 @@ from sqlalchemy.orm import Session
 
 from app.models.delivery import DeliveryAgent, DeliveryEvent, DeliveryJob
 from app.models.order import Order
+from app.services.delivery_providers import OwnAgentProvider
+from app.services.external_delivery_providers import OlaProvider, ProviderNotConfigured, RapidoProvider, UberDirectProvider
 
 VALID_AGENT_STATUS = {"offline", "available", "busy"}
 VALID_DELIVERY_STATUS = {"created", "dispatching", "assigned", "picked_up", "out_for_delivery", "delivered", "cancelled", "failed"}
+VALID_PROVIDERS = {"own_agent", "uber_direct", "rapido", "ola"}
 TRANSITIONS = {
     "created": {"dispatching", "cancelled", "failed"},
     "dispatching": {"assigned", "cancelled", "failed"},
@@ -25,6 +28,18 @@ def _event(db: Session, job: DeliveryJob, status: str, actor_type: str, actor_id
     db.add(DeliveryEvent(delivery_job_id=job.id, restaurant_id=job.restaurant_id, status=status, actor_type=actor_type, actor_id=actor_id, **kwargs))
 
 
+def provider_for(name: str):
+    if name == "own_agent":
+        return OwnAgentProvider()
+    if name == "uber_direct":
+        return UberDirectProvider()
+    if name == "rapido":
+        return RapidoProvider()
+    if name == "ola":
+        return OlaProvider()
+    raise HTTPException(status_code=422, detail=f"Unsupported delivery provider: {name}")
+
+
 def create_delivery(db: Session, restaurant_id: str, payload) -> DeliveryJob:
     order = db.query(Order).filter(Order.id == payload.order_id, Order.restaurant_id == restaurant_id).first()
     if not order:
@@ -32,10 +47,40 @@ def create_delivery(db: Session, restaurant_id: str, payload) -> DeliveryJob:
     existing = db.query(DeliveryJob).filter(DeliveryJob.order_id == order.id, DeliveryJob.restaurant_id == restaurant_id).first()
     if existing:
         return existing
-    job = DeliveryJob(restaurant_id=restaurant_id, order_id=order.id, delivery_address=payload.delivery_address, pickup_address=payload.pickup_address, customer_name=payload.customer_name, customer_phone=payload.customer_phone, provider="own_agent", status="created")
+    provider_name = payload.provider.lower()
+    if provider_name not in VALID_PROVIDERS:
+        raise HTTPException(status_code=422, detail="Unsupported delivery provider")
+    try:
+        provider = provider_for(provider_name)
+        provider_delivery_id = None
+        if provider_name != "own_agent":
+            if not payload.pickup_address:
+                raise HTTPException(status_code=422, detail="Pickup address is required for external delivery")
+            result = provider.create_delivery(
+                pickup_address=payload.pickup_address,
+                delivery_address=payload.delivery_address,
+                customer_name=payload.customer_name,
+                customer_phone=payload.customer_phone,
+                idempotency_key=f"spiceos-order-{order.id}",
+            )
+            provider_delivery_id = result.provider_delivery_id
+    except ProviderNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    job = DeliveryJob(
+        restaurant_id=restaurant_id,
+        order_id=order.id,
+        delivery_address=payload.delivery_address,
+        pickup_address=payload.pickup_address,
+        customer_name=payload.customer_name,
+        customer_phone=payload.customer_phone,
+        provider=provider_name,
+        provider_delivery_id=provider_delivery_id,
+        status="dispatching" if provider_name != "own_agent" else "created",
+    )
     db.add(job)
     db.flush()
-    _event(db, job, "created", "system")
+    _event(db, job, job.status, "system", note=f"Provider: {provider_name}")
     db.commit()
     db.refresh(job)
     return job
@@ -46,6 +91,8 @@ def assign_delivery(db: Session, restaurant_id: str, delivery_id: int, agent_id:
     agent = db.query(DeliveryAgent).filter(DeliveryAgent.id == agent_id, DeliveryAgent.restaurant_id == restaurant_id, DeliveryAgent.is_active.is_(True)).first()
     if not job or not agent:
         raise HTTPException(status_code=404, detail="Delivery or agent not found")
+    if job.provider != "own_agent":
+        raise HTTPException(status_code=409, detail="External-provider deliveries cannot be assigned to an own agent")
     if agent.status not in {"available", "busy"}:
         raise HTTPException(status_code=409, detail="Agent is not available")
     if job.status not in {"created", "dispatching", "failed"}:
@@ -71,8 +118,8 @@ def update_status(db: Session, restaurant_id: str, delivery_id: int, payload, ac
     job.updated_at = datetime.utcnow()
     if payload.status in {"delivered", "cancelled", "failed"} and job.agent_id:
         agent = db.query(DeliveryAgent).filter(DeliveryAgent.id == job.agent_id, DeliveryAgent.restaurant_id == restaurant_id).first()
-        if agent:
-            agent.status = "available" if payload.status == "delivered" else agent.status
+        if agent and payload.status == "delivered":
+            agent.status = "available"
     _event(db, job, payload.status, actor_type, actor_id, note=payload.note, latitude=payload.latitude, longitude=payload.longitude)
     db.commit()
     db.refresh(job)
