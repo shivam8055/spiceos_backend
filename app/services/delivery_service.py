@@ -6,8 +6,8 @@ from sqlalchemy.orm import Session
 
 from app.models.delivery import DeliveryAgent, DeliveryEvent, DeliveryJob
 from app.models.order import Order
-from app.services.delivery_providers import OlaProvider, ProviderNotConfigured, RapidoProvider, UberDirectProvider
 from app.services.delivery_providers import OwnAgentProvider
+from app.services.external_delivery_providers import OlaProvider, ProviderNotConfigured, RapidoProvider, UberDirectProvider
 
 VALID_AGENT_STATUS = {"offline", "available", "busy"}
 VALID_DELIVERY_STATUS = {"created", "dispatching", "assigned", "picked_up", "out_for_delivery", "delivered", "cancelled", "failed"}
