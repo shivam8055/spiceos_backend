@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.api.dependencies import get_db, get_current_user
 from app.models.delivery import DeliveryAgent, DeliveryEvent, DeliveryJob
 from app.schemas.delivery import DeliveryAgentCreate, DeliveryAgentUpdate, DeliveryAssign, DeliveryCreate, DeliveryLocationUpdate, DeliveryStatusUpdate
-from app.services.delivery_service import create_delivery, assign_delivery, update_location, update_status
+from app.services.delivery_service import VALID_PROVIDERS, create_delivery, assign_delivery, provider_for, update_location, update_status
 
 router = APIRouter(prefix="/delivery", tags=["delivery"])
 
@@ -14,6 +14,21 @@ def restaurant_id_for(user):
     if not restaurant_id:
         raise HTTPException(status_code=403, detail="Restaurant is not assigned")
     return restaurant_id
+
+
+@router.get("/providers")
+def list_providers():
+    providers = []
+    for name in sorted(VALID_PROVIDERS):
+        configured = True
+        reason = None
+        try:
+            provider_for(name)
+        except Exception as exc:
+            configured = False
+            reason = str(exc)
+        providers.append({"provider": name, "configured": configured, "reason": reason})
+    return providers
 
 
 @router.get("/agents")
