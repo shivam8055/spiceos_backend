@@ -6,8 +6,8 @@ from sqlalchemy.orm import Session
 
 from app.models.delivery import DeliveryAgent, DeliveryEvent, DeliveryJob
 from app.models.order import Order
+from app.services.delivery_providers import OlaProvider, ProviderNotConfigured, RapidoProvider, UberDirectProvider
 from app.services.delivery_providers import OwnAgentProvider
-from app.services.external_delivery_providers import OlaProvider, ProviderNotConfigured, RapidoProvider, UberDirectProvider
 
 VALID_AGENT_STATUS = {"offline", "available", "busy"}
 VALID_DELIVERY_STATUS = {"created", "dispatching", "assigned", "picked_up", "out_for_delivery", "delivered", "cancelled", "failed"}
@@ -80,12 +80,13 @@ def create_delivery(db: Session, restaurant_id: str, payload) -> DeliveryJob:
         customer_phone=payload.customer_phone,
         provider=provider_name,
         provider_delivery_id=provider_delivery_id,
+        tracking_url=tracking_url,
         eta_minutes=eta_minutes,
         status="dispatching" if provider_name != "own_agent" else "created",
     )
     db.add(job)
     db.flush()
-    _event(db, job, job.status, "system", note=f"Provider: {provider_name}" + (f"; tracking: {tracking_url}" if tracking_url else ""))
+    _event(db, job, job.status, "system", note=f"Provider: {provider_name}")
     db.commit()
     db.refresh(job)
     return job
@@ -102,12 +103,11 @@ def assign_delivery(db: Session, restaurant_id: str, delivery_id: int, agent_id:
         raise HTTPException(status_code=409, detail="Agent is not available")
     if job.status not in {"created", "dispatching", "failed"}:
         raise HTTPException(status_code=409, detail="Delivery cannot be assigned in its current state")
-    if job.status != "assigned":
-        job.status = "assigned"
-        _event(db, job, "assigned", "staff", str(agent.id))
+    job.status = "assigned"
     job.agent_id = agent.id
     agent.status = "busy"
     job.updated_at = datetime.utcnow()
+    _event(db, job, "assigned", "staff", str(agent.id))
     db.commit()
     db.refresh(job)
     return job
@@ -123,7 +123,7 @@ def update_status(db: Session, restaurant_id: str, delivery_id: int, payload, ac
     job.updated_at = datetime.utcnow()
     if payload.status in {"delivered", "cancelled", "failed"} and job.agent_id:
         agent = db.query(DeliveryAgent).filter(DeliveryAgent.id == job.agent_id, DeliveryAgent.restaurant_id == restaurant_id).first()
-        if agent and payload.status == "delivered":
+        if agent:
             agent.status = "available"
     _event(db, job, payload.status, actor_type, actor_id, note=payload.note, latitude=payload.latitude, longitude=payload.longitude)
     db.commit()
@@ -137,6 +137,28 @@ def update_location(db: Session, restaurant_id: str, delivery_id: int, payload) 
         raise HTTPException(status_code=404, detail="Delivery not found")
     job.latitude, job.longitude, job.updated_at = payload.latitude, payload.longitude, datetime.utcnow()
     _event(db, job, job.status, "agent", str(job.agent_id) if job.agent_id else None, latitude=payload.latitude, longitude=payload.longitude)
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+def refresh_external_status(db: Session, restaurant_id: str, delivery_id: int) -> DeliveryJob:
+    job = db.query(DeliveryJob).filter(DeliveryJob.id == delivery_id, DeliveryJob.restaurant_id == restaurant_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Delivery not found")
+    if job.provider == "own_agent" or not job.provider_delivery_id:
+        return job
+    try:
+        result = provider_for(job.provider).get_status(job.provider_delivery_id)
+    except ProviderNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Provider status lookup failed: {exc}") from exc
+    if result.tracking_url:
+        job.tracking_url = result.tracking_url
+    if result.eta_minutes is not None:
+        job.eta_minutes = result.eta_minutes
+    _event(db, job, job.status, "provider", job.provider, note=f"Provider status: {result.status}")
     db.commit()
     db.refresh(job)
     return job
