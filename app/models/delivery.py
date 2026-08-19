@@ -29,6 +29,7 @@ class DeliveryJob(Base):
     agent_id = Column(Integer, ForeignKey("delivery_agents.id"), nullable=True, index=True)
     provider = Column(String(40), nullable=False, default="own_agent")
     provider_delivery_id = Column(String(120), nullable=True, index=True)
+    tracking_url = Column(Text, nullable=True)
     status = Column(String(30), nullable=False, default="created", index=True)
     pickup_address = Column(Text, nullable=True)
     delivery_address = Column(Text, nullable=False)
