@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.api.dependencies import get_db, get_current_user
+from app.api.dependencies import get_db, get_current_user, require_manager, require_staff
 from app.models.delivery import DeliveryAgent, DeliveryEvent, DeliveryJob
 from app.schemas.delivery import DeliveryAgentCreate, DeliveryAgentUpdate, DeliveryAssign, DeliveryCreate, DeliveryLocationUpdate, DeliveryStatusUpdate
-from app.services.delivery_service import VALID_PROVIDERS, create_delivery, assign_delivery, provider_for, update_location, update_status
+from app.services.delivery_service import VALID_PROVIDERS, assign_delivery, create_delivery, provider_for, refresh_external_status, update_location, update_status
 
 router = APIRouter(prefix="/delivery", tags=["delivery"])
 
@@ -38,7 +38,7 @@ def list_agents(db: Session = Depends(get_db), user=Depends(get_current_user)):
 
 
 @router.post("/agents", status_code=201)
-def create_agent(payload: DeliveryAgentCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def create_agent(payload: DeliveryAgentCreate, db: Session = Depends(get_db), user=Depends(require_manager)):
     rid = restaurant_id_for(user)
     agent = DeliveryAgent(restaurant_id=rid, name=payload.name, phone=payload.phone, status="offline")
     db.add(agent)
@@ -48,7 +48,7 @@ def create_agent(payload: DeliveryAgentCreate, db: Session = Depends(get_db), us
 
 
 @router.patch("/agents/{agent_id}")
-def update_agent(agent_id: int, payload: DeliveryAgentUpdate, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def update_agent(agent_id: int, payload: DeliveryAgentUpdate, db: Session = Depends(get_db), user=Depends(require_manager)):
     rid = restaurant_id_for(user)
     agent = db.query(DeliveryAgent).filter(DeliveryAgent.id == agent_id, DeliveryAgent.restaurant_id == rid).first()
     if not agent:
@@ -69,23 +69,28 @@ def list_jobs(db: Session = Depends(get_db), user=Depends(get_current_user)):
 
 
 @router.post("/jobs", status_code=201)
-def create_job(payload: DeliveryCreate, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def create_job(payload: DeliveryCreate, db: Session = Depends(get_db), user=Depends(require_staff)):
     return create_delivery(db, restaurant_id_for(user), payload)
 
 
 @router.post("/jobs/{delivery_id}/assign")
-def assign_job(delivery_id: int, payload: DeliveryAssign, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def assign_job(delivery_id: int, payload: DeliveryAssign, db: Session = Depends(get_db), user=Depends(require_staff)):
     return assign_delivery(db, restaurant_id_for(user), delivery_id, payload.agent_id)
 
 
 @router.post("/jobs/{delivery_id}/status")
-def job_status(delivery_id: int, payload: DeliveryStatusUpdate, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def job_status(delivery_id: int, payload: DeliveryStatusUpdate, db: Session = Depends(get_db), user=Depends(require_staff)):
     return update_status(db, restaurant_id_for(user), delivery_id, payload, "staff", str(getattr(user, "id", "")))
 
 
 @router.post("/jobs/{delivery_id}/location")
-def job_location(delivery_id: int, payload: DeliveryLocationUpdate, db: Session = Depends(get_db), user=Depends(get_current_user)):
+def job_location(delivery_id: int, payload: DeliveryLocationUpdate, db: Session = Depends(get_db), user=Depends(require_staff)):
     return update_location(db, restaurant_id_for(user), delivery_id, payload)
+
+
+@router.post("/jobs/{delivery_id}/refresh")
+def refresh_job(delivery_id: int, db: Session = Depends(get_db), user=Depends(require_staff)):
+    return refresh_external_status(db, restaurant_id_for(user), delivery_id)
 
 
 @router.get("/jobs/{delivery_id}/events")
@@ -102,4 +107,12 @@ def public_tracking(delivery_token: str, db: Session = Depends(get_db)):
     job = db.query(DeliveryJob).filter(DeliveryJob.delivery_token == delivery_token).first()
     if not job:
         raise HTTPException(status_code=404, detail="Tracking link not found")
-    return {"delivery_token": job.delivery_token, "status": job.status, "provider": job.provider, "eta_minutes": job.eta_minutes, "latitude": job.latitude, "longitude": job.longitude}
+    return {
+        "delivery_token": job.delivery_token,
+        "status": job.status,
+        "provider": job.provider,
+        "eta_minutes": job.eta_minutes,
+        "tracking_url": job.tracking_url,
+        "latitude": job.latitude,
+        "longitude": job.longitude,
+    }
