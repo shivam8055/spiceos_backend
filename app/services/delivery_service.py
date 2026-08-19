@@ -14,7 +14,7 @@ VALID_DELIVERY_STATUS = {"created", "dispatching", "assigned", "picked_up", "out
 VALID_PROVIDERS = {"own_agent", "uber_direct", "rapido", "ola"}
 TRANSITIONS = {
     "created": {"dispatching", "cancelled", "failed"},
-    "dispatching": {"assigned", "cancelled", "failed"},
+    "dispatching": {"assigned", "cancelled", "failed", "picked_up", "out_for_delivery"},
     "assigned": {"picked_up", "cancelled", "failed"},
     "picked_up": {"out_for_delivery", "cancelled", "failed"},
     "out_for_delivery": {"delivered", "cancelled", "failed"},
@@ -53,6 +53,8 @@ def create_delivery(db: Session, restaurant_id: str, payload) -> DeliveryJob:
     try:
         provider = provider_for(provider_name)
         provider_delivery_id = None
+        eta_minutes = None
+        tracking_url = None
         if provider_name != "own_agent":
             if not payload.pickup_address:
                 raise HTTPException(status_code=422, detail="Pickup address is required for external delivery")
@@ -64,6 +66,8 @@ def create_delivery(db: Session, restaurant_id: str, payload) -> DeliveryJob:
                 idempotency_key=f"spiceos-order-{order.id}",
             )
             provider_delivery_id = result.provider_delivery_id
+            eta_minutes = result.eta_minutes
+            tracking_url = result.tracking_url
     except ProviderNotConfigured as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
@@ -76,11 +80,12 @@ def create_delivery(db: Session, restaurant_id: str, payload) -> DeliveryJob:
         customer_phone=payload.customer_phone,
         provider=provider_name,
         provider_delivery_id=provider_delivery_id,
+        eta_minutes=eta_minutes,
         status="dispatching" if provider_name != "own_agent" else "created",
     )
     db.add(job)
     db.flush()
-    _event(db, job, job.status, "system", note=f"Provider: {provider_name}")
+    _event(db, job, job.status, "system", note=f"Provider: {provider_name}" + (f"; tracking: {tracking_url}" if tracking_url else ""))
     db.commit()
     db.refresh(job)
     return job
