@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.v1.auth import router as auth_router
 from app.api.v1.delivery import router as delivery_router
 from app.api.v1.inventory import router as inventory_router
 from app.api.v1.orders import router as orders_router
@@ -21,6 +22,7 @@ app.add_middleware(
 
 migrate_delivery_schema(engine)
 
+app.include_router(auth_router, prefix="/auth", tags=["auth"])
 app.include_router(users_router)
 app.include_router(orders_router)
 app.include_router(inventory_router)
