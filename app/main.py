@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.auth import router as auth_router
 from app.api.v1.delivery import router as delivery_router
+from app.api.v1.delivery_webhooks import router as delivery_webhooks_router
 from app.api.v1.inventory import router as inventory_router
 from app.api.v1.orders import router as orders_router
 from app.api.v1.qr_ordering import router as qr_router
@@ -28,6 +29,7 @@ app.include_router(orders_router)
 app.include_router(inventory_router)
 app.include_router(qr_router)
 app.include_router(delivery_router)
+app.include_router(delivery_webhooks_router)
 
 
 @app.get("/health")
