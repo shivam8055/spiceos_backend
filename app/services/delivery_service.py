@@ -22,6 +22,23 @@ TRANSITIONS = {
     "cancelled": set(),
     "failed": {"dispatching", "cancelled"},
 }
+EXTERNAL_STATUS_MAP = {
+    "pending": "dispatching",
+    "pickup": "assigned",
+    "pickup_complete": "picked_up",
+    "dropoff": "out_for_delivery",
+    "delivered": "delivered",
+    "canceled": "cancelled",
+    "cancelled": "cancelled",
+    "failed": "failed",
+    "SCHEDULED": "dispatching",
+    "EN_ROUTE_TO_PICKUP": "assigned",
+    "ARRIVED_AT_PICKUP": "assigned",
+    "EN_ROUTE_TO_DROPOFF": "out_for_delivery",
+    "ARRIVED_AT_DROPOFF": "out_for_delivery",
+    "COMPLETED": "delivered",
+    "FAILED": "failed",
+}
 
 
 def _event(db: Session, job: DeliveryJob, status: str, actor_type: str, actor_id: Optional[str] = None, **kwargs):
@@ -154,6 +171,15 @@ def refresh_external_status(db: Session, restaurant_id: str, delivery_id: int) -
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Provider status lookup failed: {exc}") from exc
+
+    next_status = EXTERNAL_STATUS_MAP.get(result.status)
+    if next_status and next_status != job.status and next_status in TRANSITIONS.get(job.status, set()):
+        job.status = next_status
+        order = db.query(Order).filter(Order.id == job.order_id, Order.restaurant_id == restaurant_id).first()
+        if order and next_status in {"picked_up", "out_for_delivery"} and order.status == "ready":
+            order.status = "outForDelivery"
+        elif order and next_status == "delivered" and order.status == "outForDelivery":
+            order.status = "delivered"
     if result.tracking_url:
         job.tracking_url = result.tracking_url
     if result.eta_minutes is not None:
