@@ -6,7 +6,7 @@ import os
 from fastapi import APIRouter, Header, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
+from app.core.database import SessionLocal
 from app.models.delivery import DeliveryEvent, DeliveryJob
 from app.models.order import Order
 
@@ -56,7 +56,6 @@ def _apply(db: Session, provider: str, payload: dict) -> None:
         DeliveryJob.provider_delivery_id == provider_delivery_id,
     ).first()
     if not job:
-        # Acknowledge unknown deliveries so providers do not retry forever.
         return
     if event_id and db.query(DeliveryEvent).filter(
         DeliveryEvent.delivery_job_id == job.id,
@@ -76,8 +75,6 @@ def _apply(db: Session, provider: str, payload: dict) -> None:
         job.longitude = str(location.get("lng"))
     if data.get("tracking_url"):
         job.tracking_url = data["tracking_url"]
-    if data.get("dropoff_eta"):
-        job.eta_minutes = None
 
     db.add(DeliveryEvent(
         delivery_job_id=job.id,
@@ -92,7 +89,7 @@ def _apply(db: Session, provider: str, payload: dict) -> None:
 
     order = db.query(Order).filter(Order.id == job.order_id, Order.restaurant_id == job.restaurant_id).first()
     if order:
-        if job.status == "out_for_delivery" and order.status == "ready":
+        if job.status in {"picked_up", "out_for_delivery"} and order.status == "ready":
             order.status = "outForDelivery"
         elif job.status == "delivered" and order.status == "outForDelivery":
             order.status = "delivered"
@@ -117,7 +114,7 @@ async def uber_webhook(
         payload = json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=400, detail="Invalid JSON webhook payload") from exc
-    db: Session = next(get_db())
+    db: Session = SessionLocal()
     try:
         _apply(db, "uber_direct", payload)
     finally:
