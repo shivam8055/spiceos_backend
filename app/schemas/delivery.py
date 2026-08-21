@@ -24,6 +24,12 @@ class DeliveryCreate(BaseModel):
     provider: str = Field(default="own_agent", min_length=1, max_length=40)
 
 
+class DeliveryQuoteRequest(BaseModel):
+    pickup_address: str = Field(min_length=1, max_length=2000)
+    delivery_address: str = Field(min_length=1, max_length=2000)
+    provider: str = Field(default="uber_direct", min_length=1, max_length=40)
+
+
 class DeliveryAssign(BaseModel):
     agent_id: int
 
