@@ -3,8 +3,9 @@ from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_db, get_current_user, require_manager, require_staff
 from app.models.delivery import DeliveryAgent, DeliveryEvent, DeliveryJob
-from app.schemas.delivery import DeliveryAgentCreate, DeliveryAgentUpdate, DeliveryAssign, DeliveryCreate, DeliveryLocationUpdate, DeliveryStatusUpdate
+from app.schemas.delivery import DeliveryAgentCreate, DeliveryAgentUpdate, DeliveryAssign, DeliveryCreate, DeliveryLocationUpdate, DeliveryQuoteRequest, DeliveryStatusUpdate
 from app.services.delivery_service import VALID_PROVIDERS, assign_delivery, create_delivery, provider_for, refresh_external_status, update_location, update_status
+from app.services.external_delivery_providers import ProviderNotConfigured, ProviderRequestError
 
 router = APIRouter(prefix="/delivery", tags=["delivery"])
 
@@ -29,6 +30,24 @@ def list_providers():
             reason = str(exc)
         providers.append({"provider": name, "configured": configured, "reason": reason})
     return providers
+
+
+@router.post("/quote")
+def get_quote(payload: DeliveryQuoteRequest, user=Depends(require_staff)):
+    if payload.provider not in VALID_PROVIDERS:
+        raise HTTPException(status_code=422, detail="Unsupported delivery provider")
+    try:
+        quote = provider_for(payload.provider).quote(payload.pickup_address, payload.delivery_address)
+    except ProviderNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ProviderRequestError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {
+        "provider": quote.provider,
+        "amount": quote.amount,
+        "currency": quote.currency,
+        "eta_minutes": quote.eta_minutes,
+    }
 
 
 @router.get("/agents")
@@ -91,6 +110,28 @@ def job_location(delivery_id: int, payload: DeliveryLocationUpdate, db: Session 
 @router.post("/jobs/{delivery_id}/refresh")
 def refresh_job(delivery_id: int, db: Session = Depends(get_db), user=Depends(require_staff)):
     return refresh_external_status(db, restaurant_id_for(user), delivery_id)
+
+
+@router.post("/jobs/{delivery_id}/cancel")
+def cancel_job(delivery_id: int, db: Session = Depends(get_db), user=Depends(require_staff)):
+    rid = restaurant_id_for(user)
+    job = db.query(DeliveryJob).filter(DeliveryJob.id == delivery_id, DeliveryJob.restaurant_id == rid).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Delivery not found")
+    if job.status in {"delivered", "cancelled"}:
+        return job
+    if job.provider != "own_agent" and job.provider_delivery_id:
+        try:
+            provider_for(job.provider).cancel_delivery(job.provider_delivery_id)
+        except ProviderNotConfigured as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        except ProviderRequestError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+    job.status = "cancelled"
+    db.add(DeliveryEvent(delivery_job_id=job.id, restaurant_id=rid, status="cancelled", actor_type="staff", actor_id=str(getattr(user, "id", "")), note="Cancelled from SpiceOS"))
+    db.commit()
+    db.refresh(job)
+    return job
 
 
 @router.get("/jobs/{delivery_id}/events")
