@@ -59,7 +59,7 @@ def list_agents(db: Session = Depends(get_db), user=Depends(get_current_user)):
 @router.post("/agents", status_code=201)
 def create_agent(payload: DeliveryAgentCreate, db: Session = Depends(get_db), user=Depends(require_manager)):
     rid = restaurant_id_for(user)
-    agent = DeliveryAgent(restaurant_id=rid, name=payload.name, phone=payload.phone, status="offline")
+    agent = DeliveryAgent(restaurant_id=rid, name=payload.name, phone=payload.phone, status="available")
     db.add(agent)
     db.commit()
     db.refresh(agent)
