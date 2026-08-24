@@ -67,7 +67,7 @@ def create_agent(payload: DeliveryAgentCreate, db: Session = Depends(get_db), us
 
 
 @router.patch("/agents/{agent_id}")
-def update_agent(agent_id: int, payload: DeliveryAgentUpdate, db: Session = Depends(get_db), user=Depends(require_manager)):
+def update_agent(agent_id: int, payload: DeliveryAgentUpdate, db: Session = Depends(get_db), user=Depends(require_staff)):
     rid = restaurant_id_for(user)
     agent = db.query(DeliveryAgent).filter(DeliveryAgent.id == agent_id, DeliveryAgent.restaurant_id == rid).first()
     if not agent:
