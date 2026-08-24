@@ -11,6 +11,7 @@ from app.services.external_delivery_providers import OlaProvider, ProviderNotCon
 
 VALID_AGENT_STATUS = {"offline", "available", "busy"}
 VALID_DELIVERY_STATUS = {"created", "dispatching", "assigned", "picked_up", "out_for_delivery", "delivered", "cancelled", "failed"}
+VALID_PROVIDERS = {"own_agent", "uber_direct", "rapido", "ola"}
 TRANSITIONS = {
     "created": {"dispatching", "cancelled", "failed"},
     "dispatching": {"assigned", "cancelled", "failed", "picked_up", "out_for_delivery"},
