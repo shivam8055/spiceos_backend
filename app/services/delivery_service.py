@@ -7,11 +7,10 @@ from sqlalchemy.orm import Session
 from app.models.delivery import DeliveryAgent, DeliveryEvent, DeliveryJob
 from app.models.order import Order
 from app.services.delivery_providers import OwnAgentProvider
-from app.services.external_delivery_providers import OlaProvider, ProviderNotConfigured, RapidoProvider, UberDirectProvider
+from app.services.external_delivery_providers import OlaProvider, ProviderNotConfigured, ProviderRequestError, RapidoProvider, UberDirectProvider
 
 VALID_AGENT_STATUS = {"offline", "available", "busy"}
 VALID_DELIVERY_STATUS = {"created", "dispatching", "assigned", "picked_up", "out_for_delivery", "delivered", "cancelled", "failed"}
-VALID_PROVIDERS = {"own_agent", "uber_direct", "rapido", "ola"}
 TRANSITIONS = {
     "created": {"dispatching", "cancelled", "failed"},
     "dispatching": {"assigned", "cancelled", "failed", "picked_up", "out_for_delivery"},
@@ -87,6 +86,8 @@ def create_delivery(db: Session, restaurant_id: str, payload) -> DeliveryJob:
             tracking_url = result.tracking_url
     except ProviderNotConfigured as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ProviderRequestError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     job = DeliveryJob(
         restaurant_id=restaurant_id,
@@ -169,6 +170,8 @@ def refresh_external_status(db: Session, restaurant_id: str, delivery_id: int) -
         result = provider_for(job.provider).get_status(job.provider_delivery_id)
     except ProviderNotConfigured as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ProviderRequestError as exc:
+        raise HTTPException(status_code=502, detail=f"Provider status lookup failed: {exc}") from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Provider status lookup failed: {exc}") from exc
 
