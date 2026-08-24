@@ -9,6 +9,12 @@ def _id_column(engine) -> str:
     return "BIGSERIAL PRIMARY KEY" if _is_postgres(engine) else "INTEGER PRIMARY KEY"
 
 
+def _add_column_if_missing(conn, table: str, column: str, definition: str) -> None:
+    columns = {item["name"] for item in inspect(conn).get_columns(table)}
+    if column not in columns:
+        conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {definition}"))
+
+
 def migrate_delivery_schema(engine):
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
@@ -20,9 +26,18 @@ def migrate_delivery_schema(engine):
                 f"CREATE TABLE delivery_agents ("
                 f"id {id_column}, restaurant_id VARCHAR NOT NULL, name VARCHAR(120) NOT NULL, "
                 "phone VARCHAR(40), status VARCHAR(20) NOT NULL DEFAULT 'offline', "
-                "is_active BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMP NOT NULL, "
-                "updated_at TIMESTAMP NOT NULL)"
+                "is_active BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, "
+                "updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"
             ))
+        else:
+            # Existing installations may have an older delivery_agents table.
+            # SQLAlchemy selects every mapped column, so missing legacy columns
+            # turn an otherwise valid list request into a 500/CORS-looking error.
+            _add_column_if_missing(conn, "delivery_agents", "phone", "VARCHAR(40)")
+            _add_column_if_missing(conn, "delivery_agents", "status", "VARCHAR(20) NOT NULL DEFAULT 'offline'")
+            _add_column_if_missing(conn, "delivery_agents", "is_active", "BOOLEAN NOT NULL DEFAULT TRUE")
+            _add_column_if_missing(conn, "delivery_agents", "created_at", "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP")
+            _add_column_if_missing(conn, "delivery_agents", "updated_at", "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP")
 
         if "delivery_jobs" not in tables:
             conn.execute(text(
@@ -33,17 +48,42 @@ def migrate_delivery_schema(engine):
                 "tracking_url TEXT, status VARCHAR(30) NOT NULL DEFAULT 'created', pickup_address TEXT, "
                 "delivery_address TEXT NOT NULL, customer_name VARCHAR(120), customer_phone VARCHAR(40), "
                 "eta_minutes INTEGER, latitude VARCHAR(32), longitude VARCHAR(32), "
-                "created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL)"
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"
             ))
         else:
-            columns = {column["name"] for column in inspect(conn).get_columns("delivery_jobs")}
-            if "tracking_url" not in columns:
-                conn.execute(text("ALTER TABLE delivery_jobs ADD COLUMN tracking_url TEXT"))
+            _add_column_if_missing(conn, "delivery_jobs", "delivery_token", "VARCHAR(64)")
+            _add_column_if_missing(conn, "delivery_jobs", "restaurant_id", "VARCHAR")
+            _add_column_if_missing(conn, "delivery_jobs", "order_id", "INTEGER")
+            _add_column_if_missing(conn, "delivery_jobs", "agent_id", "BIGINT")
+            _add_column_if_missing(conn, "delivery_jobs", "provider", "VARCHAR(40) NOT NULL DEFAULT 'own_agent'")
+            _add_column_if_missing(conn, "delivery_jobs", "provider_delivery_id", "VARCHAR(120)")
+            _add_column_if_missing(conn, "delivery_jobs", "tracking_url", "TEXT")
+            _add_column_if_missing(conn, "delivery_jobs", "status", "VARCHAR(30) NOT NULL DEFAULT 'created'")
+            _add_column_if_missing(conn, "delivery_jobs", "pickup_address", "TEXT")
+            _add_column_if_missing(conn, "delivery_jobs", "delivery_address", "TEXT")
+            _add_column_if_missing(conn, "delivery_jobs", "customer_name", "VARCHAR(120)")
+            _add_column_if_missing(conn, "delivery_jobs", "customer_phone", "VARCHAR(40)")
+            _add_column_if_missing(conn, "delivery_jobs", "eta_minutes", "INTEGER")
+            _add_column_if_missing(conn, "delivery_jobs", "latitude", "VARCHAR(32)")
+            _add_column_if_missing(conn, "delivery_jobs", "longitude", "VARCHAR(32)")
+            _add_column_if_missing(conn, "delivery_jobs", "created_at", "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP")
+            _add_column_if_missing(conn, "delivery_jobs", "updated_at", "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP")
 
         if "delivery_events" not in tables:
             conn.execute(text(
                 f"CREATE TABLE delivery_events ("
                 f"id {id_column}, delivery_job_id BIGINT NOT NULL, restaurant_id VARCHAR NOT NULL, "
                 "status VARCHAR(30) NOT NULL, actor_type VARCHAR(30) NOT NULL, actor_id VARCHAR(120), "
-                "latitude VARCHAR(32), longitude VARCHAR(32), note TEXT, created_at TIMESTAMP NOT NULL)"
+                "latitude VARCHAR(32), longitude VARCHAR(32), note TEXT, "
+                "created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)"
             ))
+        else:
+            _add_column_if_missing(conn, "delivery_events", "delivery_job_id", "BIGINT")
+            _add_column_if_missing(conn, "delivery_events", "restaurant_id", "VARCHAR")
+            _add_column_if_missing(conn, "delivery_events", "status", "VARCHAR(30)")
+            _add_column_if_missing(conn, "delivery_events", "actor_type", "VARCHAR(30)")
+            _add_column_if_missing(conn, "delivery_events", "actor_id", "VARCHAR(120)")
+            _add_column_if_missing(conn, "delivery_events", "latitude", "VARCHAR(32)")
+            _add_column_if_missing(conn, "delivery_events", "longitude", "VARCHAR(32)")
+            _add_column_if_missing(conn, "delivery_events", "note", "TEXT")
+            _add_column_if_missing(conn, "delivery_events", "created_at", "TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP")
