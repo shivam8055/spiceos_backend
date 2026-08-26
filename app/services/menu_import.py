@@ -8,7 +8,9 @@ import re
 import time
 
 import httpx
+import pytesseract
 from PIL import Image, ImageOps
+from pytesseract import Output
 
 from app.schemas.menu_import import ImportedMenuItem
 
@@ -77,14 +79,14 @@ async def _openai_extract(payload: dict, api_key: str, model: str) -> httpx.Resp
 
 
 def _prepare_menu_image(content: bytes, content_type: str) -> tuple[bytes, str]:
-    """Normalize phone/WhatsApp images before sending them to vision."""
+    """Normalize phone/WhatsApp images before sending to vision or OCR."""
     try:
         image = Image.open(io.BytesIO(content))
         image = ImageOps.exif_transpose(image)
         if image.mode != "RGB":
             image = image.convert("RGB")
 
-        max_dimension = 1400
+        max_dimension = 1800
         if max(image.size) > max_dimension:
             scale = max_dimension / max(image.size)
             image = image.resize(
@@ -93,7 +95,7 @@ def _prepare_menu_image(content: bytes, content_type: str) -> tuple[bytes, str]:
             )
 
         output = io.BytesIO()
-        image.save(output, format="JPEG", quality=70, optimize=True)
+        image.save(output, format="JPEG", quality=78, optimize=True)
         prepared = output.getvalue()
         if len(prepared) <= 4 * 1024 * 1024:
             return prepared, "image/jpeg"
@@ -114,10 +116,121 @@ def _parse_result(response: httpx.Response) -> tuple[list[ImportedMenuItem], lis
     return items, warnings
 
 
+def _clean_ocr_line(value: str) -> str:
+    value = re.sub(r"[\u2022\u25cf\u25aa\u2013\u2014]+", " ", value)
+    value = re.sub(r"\s+", " ", value).strip(" .:-|\t")
+    return value
+
+
+def _parse_price_line(line: str) -> tuple[str, float] | None:
+    """Extract a menu item and its trailing price from common Indian menu formats."""
+    line = _clean_ocr_line(line)
+    if not line:
+        return None
+
+    # OCR frequently turns ₹ into ?, R, or Rs. Accept those forms but only
+    # when a 2-5 digit price is at the end of the line.
+    match = re.search(r"(?:₹|Rs\.?|INR|\?)?\s*(\d{2,5}(?:[.,]\d{1,2})?)\s*$", line, re.I)
+    if not match:
+        return None
+
+    raw_price = match.group(1).replace(",", "")
+    try:
+        price = float(raw_price)
+    except ValueError:
+        return None
+
+    # Avoid treating years/phone numbers as prices.
+    if price < 10 or price > 100000:
+        return None
+
+    name = line[: match.start()].strip(" .:-|\t₹?RrsIN")
+    name = re.sub(r"\s+", " ", name).strip(" .:-|\t")
+    if len(name) < 2:
+        return None
+    return name[:255], price
+
+
+def _looks_like_category(line: str) -> bool:
+    line = _clean_ocr_line(line)
+    if not line or len(line) > 55 or re.search(r"\d", line):
+        return False
+    words = line.split()
+    if len(words) > 7:
+        return False
+    # Headings are commonly uppercase, title-cased, or short labels.
+    letters = [c for c in line if c.isalpha()]
+    upper_ratio = sum(c.isupper() for c in letters) / max(1, len(letters))
+    return upper_ratio > 0.65 or len(words) <= 4
+
+
+def _local_ocr_extract(content: bytes) -> tuple[list[ImportedMenuItem], list[str]]:
+    """Offline fallback used when OpenAI has no quota or is temporarily unavailable."""
+    try:
+        image = Image.open(io.BytesIO(content))
+        image = ImageOps.exif_transpose(image).convert("RGB")
+        if max(image.size) < 1400:
+            scale = 1400 / max(image.size)
+            image = image.resize(
+                (max(1, round(image.width * scale)), max(1, round(image.height * scale))),
+                Image.Resampling.LANCZOS,
+            )
+
+        # psm 6 works well for photographed menus containing multiple columns.
+        text = pytesseract.image_to_string(image, lang="eng+hin", config="--psm 6")
+    except Exception as exc:
+        raise MenuImportError(
+            "AI credits are unavailable and the local OCR fallback could not run. "
+            "Please add OpenAI credits or upload a clearer menu image."
+        ) from exc
+
+    items: list[ImportedMenuItem] = []
+    warnings: list[str] = []
+    current_category = "Imported Menu"
+    seen: set[tuple[str, float]] = set()
+
+    for raw_line in text.splitlines():
+        line = _clean_ocr_line(raw_line)
+        if not line:
+            continue
+
+        parsed = _parse_price_line(line)
+        if parsed:
+            name, price = parsed
+            # Remove obvious OCR artefacts and extremely long descriptions.
+            name = re.sub(r"\s{2,}", " ", name).strip()
+            if not name or name.lower() in {"menu", "price", "items"}:
+                continue
+            key = (name.casefold(), price)
+            if key in seen:
+                continue
+            seen.add(key)
+            items.append(
+                ImportedMenuItem(
+                    category=current_category[:100],
+                    name=name,
+                    description=None,
+                    price=price,
+                    available=True,
+                )
+            )
+        elif _looks_like_category(line):
+            current_category = line[:100]
+
+    if not items:
+        warnings.append(
+            "Local OCR could not confidently find item prices. Try a sharper, straight-on menu photo."
+        )
+    else:
+        warnings.append(
+            "Imported with local OCR because OpenAI credits/rate limits were unavailable. Review item names and prices before publishing."
+        )
+
+    return items, warnings
+
+
 async def extract_menu_from_image(content: bytes, content_type: str) -> tuple[list[ImportedMenuItem], list[str]]:
     api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise MenuImportError("AI menu import is not configured. Set OPENAI_API_KEY on the backend.")
 
     if content_type not in {"image/jpeg", "image/png", "image/webp"}:
         raise MenuImportError("Please upload a JPG, PNG, or WEBP menu image.")
@@ -125,11 +238,15 @@ async def extract_menu_from_image(content: bytes, content_type: str) -> tuple[li
         raise MenuImportError("Menu image is too large. Maximum size is 15 MB.")
 
     prepared_content, prepared_type = _prepare_menu_image(content, content_type)
+
+    # If no OpenAI key is configured, do not make the feature unusable: use
+    # the local OCR fallback instead.
+    if not api_key:
+        return _local_ocr_extract(prepared_content)
+
     configured_primary = os.getenv("OPENAI_MENU_MODEL", "gpt-4o-mini").strip()
     configured_fallback = os.getenv("OPENAI_MENU_FALLBACK_MODEL", "gpt-4.1-mini").strip()
 
-    # gpt-4o-mini is deliberately first: it is a compact vision-capable model
-    # and avoids repeatedly hammering a more heavily rate-limited primary model.
     models: list[str] = []
     for model in ("gpt-4o-mini", configured_primary, configured_fallback, "gpt-4.1-mini"):
         if model and model not in models:
@@ -178,19 +295,27 @@ async def extract_menu_from_image(content: bytes, content_type: str) -> tuple[li
             break
         if last_code == "insufficient_quota":
             break
-        # If the first model is rate-limited, use the fallback once. The
-        # fallback is deliberately not retried again, avoiding a rate-limit storm.
         if index == 0 and len(models) > 1:
             continue
 
-    if response is None:
-        raise MenuImportError("AI menu extraction did not start.")
+    # Critical reliability path: an OpenAI quota/rate-limit must no longer
+    # make menu import unusable. Fall back to local OCR before returning 429.
+    if response is not None and response.status_code == 429:
+        try:
+            return _local_ocr_extract(prepared_content)
+        except MenuImportError:
+            if last_code == "insufficient_quota":
+                raise MenuImportError(
+                    "OpenAI API quota is exhausted and local OCR could not extract this menu. "
+                    "Add API credits to the OpenAI project used by OPENAI_API_KEY or upload a clearer image."
+                )
+            detail_text = last_message or "OpenAI is temporarily rate-limiting the menu import request"
+            raise MenuImportError(
+                f"{detail_text}. Local OCR was also unavailable; please try again with a clearer image."
+            )
 
-    if response.status_code == 429 and last_code == "insufficient_quota":
-        raise MenuImportError("OpenAI API quota is exhausted. Add API credits/billing to the OpenAI project used by OPENAI_API_KEY, then try again.")
-    if response.status_code == 429:
-        detail_text = last_message or "OpenAI is temporarily rate-limiting the menu import request"
-        raise MenuImportError(f"OpenAI menu extraction is temporarily rate-limited. Please wait 15–30 seconds and try again. {detail_text}")
+    if response is None:
+        return _local_ocr_extract(prepared_content)
     if last_message:
         raise MenuImportError(f"OpenAI menu extraction failed: {last_message}")
     raise MenuImportError(f"AI menu extraction failed ({response.status_code}).")
