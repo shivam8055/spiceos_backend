@@ -3,6 +3,8 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+# Railway does not shell-expand $PORT in a direct start command.
+# Run through sh so the injected Railway PORT is expanded correctly.
+startCommand = "sh -c 'uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}'"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
