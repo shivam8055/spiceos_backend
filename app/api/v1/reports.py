@@ -75,7 +75,7 @@ def reports_summary(
         if order.payment_status == "paid" and order.status != "cancelled":
             day_entry["sales"] += float(order.total or 0)
 
-    average_order_value = net_sales / completed_orders if completed_orders else 0.0
+    average_order_value = net_sales / len(paid_orders) if paid_orders else 0.0
     completion_rate = (completed_orders / total_orders * 100) if total_orders else 0.0
     cancellation_rate = (cancelled_orders / total_orders * 100) if total_orders else 0.0
 
