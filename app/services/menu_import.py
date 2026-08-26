@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import json
 import os
@@ -10,6 +11,39 @@ from app.schemas.menu_import import ImportedMenuItem
 
 class MenuImportError(RuntimeError):
     pass
+
+
+async def _openai_extract(payload: dict, api_key: str) -> httpx.Response:
+    """Call OpenAI with short retries for transient rate limits."""
+    async with httpx.AsyncClient(timeout=90) as client:
+        for attempt in range(3):
+            response = await client.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+            if response.status_code != 429 or attempt == 2:
+                return response
+
+            # A depleted quota cannot be fixed by retrying.
+            try:
+                error = response.json().get("error", {})
+                if error.get("code") == "insufficient_quota":
+                    return response
+            except (ValueError, TypeError):
+                pass
+
+            retry_after = response.headers.get("retry-after")
+            try:
+                delay = min(float(retry_after), 8.0) if retry_after else 2.0 * (attempt + 1)
+            except ValueError:
+                delay = 2.0 * (attempt + 1)
+            await asyncio.sleep(delay)
+
+    raise RuntimeError("OpenAI request failed unexpectedly.")
 
 
 async def extract_menu_from_image(content: bytes, content_type: str) -> tuple[list[ImportedMenuItem], list[str]]:
@@ -28,6 +62,7 @@ async def extract_menu_from_image(content: bytes, content_type: str) -> tuple[li
     payload = {
         "model": os.getenv("OPENAI_MENU_MODEL", "gpt-4.1-mini"),
         "temperature": 0,
+        "response_format": {"type": "json_object"},
         "messages": [{
             "role": "user",
             "content": [
@@ -37,14 +72,23 @@ async def extract_menu_from_image(content: bytes, content_type: str) -> tuple[li
         }],
     }
 
-    async with httpx.AsyncClient(timeout=90) as client:
-        response = await client.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json=payload,
-        )
+    response = await _openai_extract(payload, api_key)
 
     if response.status_code >= 400:
+        try:
+            error = response.json().get("error", {})
+            code = error.get("code")
+            message = error.get("message")
+        except (ValueError, TypeError):
+            code = None
+            message = None
+
+        if response.status_code == 429 and code == "insufficient_quota":
+            raise MenuImportError("OpenAI API quota is exhausted. Add API credits/billing to the OpenAI project used by OPENAI_API_KEY, then try again.")
+        if response.status_code == 429:
+            raise MenuImportError("OpenAI API rate limit reached. SpiceOS retried automatically; please try the import again in a few seconds.")
+        if message:
+            raise MenuImportError(f"OpenAI menu extraction failed: {message}")
         raise MenuImportError(f"AI menu extraction failed ({response.status_code}).")
 
     try:
