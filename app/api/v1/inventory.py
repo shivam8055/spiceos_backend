@@ -26,7 +26,7 @@ def _require_restaurant_id(current_user: User) -> str:
     return current_user.restaurant_id
 
 
-@router.get("/", response_model=list[InventoryItemResponse])
+@router.get("", response_model=list[InventoryItemResponse])
 def get_inventory(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_staff),
@@ -61,7 +61,7 @@ def get_low_stock(
     )
 
 
-@router.post("/", response_model=InventoryItemResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=InventoryItemResponse, status_code=status.HTTP_201_CREATED)
 def create_inventory_item(
     payload: InventoryItemCreate,
     db: Session = Depends(get_db),
@@ -101,6 +101,79 @@ def create_inventory_item(
         ) from exc
 
     return item
+
+
+@router.put("/{item_id}", response_model=InventoryItemResponse)
+def update_inventory_item(
+    item_id: int,
+    payload: InventoryItemCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_staff),
+):
+    restaurant_id = _require_restaurant_id(current_user)
+    item = (
+        db.query(InventoryItem)
+        .filter(
+            InventoryItem.id == item_id,
+            InventoryItem.restaurant_id == restaurant_id,
+            InventoryItem.is_active.is_(True),
+        )
+        .first()
+    )
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inventory item not found.")
+
+    previous_quantity = item.quantity
+    item.name = payload.name.strip()
+    item.sku = payload.sku.strip() if payload.sku else None
+    item.unit = payload.unit.strip()
+    item.quantity = payload.quantity
+    item.reorder_level = payload.reorder_level
+    item.cost_per_unit = payload.cost_per_unit
+
+    try:
+        db.flush()
+        quantity_delta = payload.quantity - previous_quantity
+        if quantity_delta:
+            db.add(
+                InventoryMovement(
+                    inventory_item_id=item.id,
+                    quantity_delta=quantity_delta,
+                    reason="Inventory item updated",
+                    created_by_user_id=current_user.id,
+                )
+            )
+        db.commit()
+        db.refresh(item)
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="An inventory item with this SKU already exists.",
+        ) from exc
+    return item
+
+
+@router.delete("/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_inventory_item(
+    item_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_staff),
+):
+    restaurant_id = _require_restaurant_id(current_user)
+    item = (
+        db.query(InventoryItem)
+        .filter(
+            InventoryItem.id == item_id,
+            InventoryItem.restaurant_id == restaurant_id,
+            InventoryItem.is_active.is_(True),
+        )
+        .first()
+    )
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Inventory item not found.")
+    item.is_active = False
+    db.commit()
 
 
 @router.post("/{item_id}/adjust", response_model=InventoryItemResponse)
