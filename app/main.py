@@ -16,6 +16,15 @@ from app.core.config import CORS_ALLOWED_ORIGINS
 from app.core.database import engine
 from app.core.delivery_migration import migrate_delivery_schema
 
+# The menu importer falls back to local OCR when OpenAI credits/rate limits are
+# unavailable. Patch that fallback at startup with a conservative name-repair
+# layer so OCR noise such as "EE R/ Paneer Tikka" and "Chichen Tha" does not
+# reach the review/publish screen. The wrapper keeps the existing API unchanged.
+from app.services import menu_import as _menu_import
+from app.services.menu_import_name_repair import repair_local_ocr
+
+_menu_import._local_ocr_extract = repair_local_ocr(_menu_import._local_ocr_extract)
+
 app = FastAPI(title="SpiceOS Backend")
 app.add_middleware(
     CORSMiddleware,
