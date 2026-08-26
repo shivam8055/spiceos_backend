@@ -95,7 +95,7 @@ def _latest_transaction_code(db: Session, order_id: int) -> str | None:
     return payment.provider_payment_id if payment else None
 
 
-@router.get("/", response_model=list[OrderResponse])
+@router.get("", response_model=list[OrderResponse])
 def get_orders(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_staff),
@@ -128,7 +128,7 @@ def get_orders(
     return [_serialize_order(order, transaction_codes.get(order.id)) for order in orders]
 
 
-@router.post("/", response_model=OrderResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=OrderResponse, status_code=status.HTTP_201_CREATED)
 def create_order(
     order: OrderCreate,
     db: Session = Depends(get_db),
