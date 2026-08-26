@@ -7,6 +7,7 @@ from app.api.v1.customers import router as customers_router
 from app.api.v1.delivery import router as delivery_router
 from app.api.v1.delivery_webhooks import router as delivery_webhooks_router
 from app.api.v1.inventory import router as inventory_router
+from app.api.v1.menu_admin import router as menu_admin_router
 from app.api.v1.orders import router as orders_router
 from app.api.v1.qr_ordering import router as qr_router
 from app.api.v1.reports import router as reports_router
@@ -45,6 +46,7 @@ app.include_router(accounting_router)
 app.include_router(reports_router)
 app.include_router(customers_router)
 app.include_router(qr_router)
+app.include_router(menu_admin_router)
 # Keep the legacy /qr/* namespace working while the canonical API remains
 # /public/* and /admin/*.
 app.include_router(qr_router, prefix="/qr")
