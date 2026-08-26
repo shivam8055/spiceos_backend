@@ -14,6 +14,7 @@ from app.schemas.accounting import (
     ExpenseResponse,
     GSTSummary,
     PurchaseInvoiceCreate,
+    PurchaseInvoicePaymentUpdate,
     PurchaseInvoiceResponse,
     SalesInvoiceCreate,
     SalesInvoiceResponse,
@@ -155,6 +156,25 @@ def list_purchase_invoices(
     user: User = Depends(require_staff),
 ):
     return db.query(PurchaseInvoice).filter(PurchaseInvoice.restaurant_id == _restaurant_id(user)).order_by(PurchaseInvoice.invoice_date.desc(), PurchaseInvoice.id.desc()).limit(limit).all()
+
+
+@router.patch("/purchase-invoices/{invoice_id}/payment", response_model=PurchaseInvoiceResponse)
+def update_purchase_payment(
+    invoice_id: int,
+    payload: PurchaseInvoicePaymentUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_staff),
+):
+    invoice = db.query(PurchaseInvoice).filter(
+        PurchaseInvoice.id == invoice_id,
+        PurchaseInvoice.restaurant_id == _restaurant_id(user),
+    ).first()
+    if invoice is None:
+        raise HTTPException(status_code=404, detail="Purchase invoice not found.")
+    invoice.payment_status = payload.payment_status
+    db.commit()
+    db.refresh(invoice)
+    return invoice
 
 
 @router.post("/expenses", response_model=ExpenseResponse, status_code=status.HTTP_201_CREATED)
