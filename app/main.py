@@ -18,16 +18,17 @@ from app.core.config import CORS_ALLOWED_ORIGINS
 from app.core.database import engine
 from app.core.delivery_migration import migrate_delivery_schema
 
-# The menu importer falls back to local OCR when OpenAI credits/rate limits are
-# unavailable. Patch that fallback at startup with a conservative name-repair
-# layer so OCR noise such as "EE R/ Paneer Tikka" and "Chichen Tha" does not
-# reach the review/publish screen. The wrapper keeps the existing API unchanged.
+# Menu import fallbacks: repair OCR names, recover table-style momo variants,
+# and normalize categories so both admin import and public QR ordering receive
+# clean, structured menu data.
 from app.services import menu_import as _menu_import
 from app.services.menu_enrichment import enrich_extractor
 from app.services.menu_import_name_repair import repair_local_ocr
+from app.services.menu_momo_table import augment_local_ocr
 
 _menu_import._local_ocr_extract = repair_local_ocr(_menu_import._local_ocr_extract)
-# Apply the same category normalization to both the local OCR and OpenAI paths.
+_menu_import._local_ocr_extract = augment_local_ocr(_menu_import._local_ocr_extract)
+_menu_import.extract_menu_from_image = enrich_extractor(_menu_import.extract_menu_from_image)
 _qr_ordering.extract_menu_from_image = enrich_extractor(_qr_ordering.extract_menu_from_image)
 
 app = FastAPI(title="SpiceOS Backend")
