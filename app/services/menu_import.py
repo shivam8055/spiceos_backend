@@ -28,7 +28,6 @@ async def _openai_extract(payload: dict, api_key: str) -> httpx.Response:
             if response.status_code != 429 or attempt == 3:
                 return response
 
-            # A depleted quota cannot be fixed by retrying or changing models.
             try:
                 error = response.json().get("error", {})
                 if error.get("code") == "insufficient_quota":
@@ -62,28 +61,33 @@ async def extract_menu_from_image(content: bytes, content_type: str) -> tuple[li
         raise MenuImportError("Menu image is too large. Maximum size is 15 MB.")
 
     image_data = base64.b64encode(content).decode("ascii")
-    prompt = """Extract the restaurant menu from this image. Return ONLY valid JSON with this exact shape: {\"items\":[{\"category\":\"...\",\"name\":\"...\",\"description\":null,\"price\":123.0,\"available\":true}],\"warnings\":[\"...\"]}.\nRules: preserve item names and prices exactly as visible; do not invent missing prices; if a price is unreadable, omit that item and add a warning; normalize currency symbols out of price; use numeric price; infer category only when clearly indicated by the menu layout; keep descriptions short; do not create modifiers from guesses."""
+    prompt = """Read this restaurant menu and return ONLY valid JSON in this exact shape: {\"items\":[{\"category\":\"...\",\"name\":\"...\",\"description\":null,\"price\":123.0,\"available\":true}],\"warnings\":[\"...\"]}. Preserve visible item names and prices. Never invent a price. If a price is unreadable, omit that item and add a warning. Remove currency symbols from numeric prices. Infer categories only when clearly shown. Keep descriptions short."""
 
     primary_model = os.getenv("OPENAI_MENU_MODEL", "gpt-4.1-mini")
     fallback_model = os.getenv("OPENAI_MENU_FALLBACK_MODEL", "gpt-4.1-nano")
+    # Menus are often large WhatsApp images. High-detail vision can consume enough
+    # image tokens to hit project TPM limits even when the API key has quota.
+    # Low detail dramatically reduces token pressure; users can still review/edit
+    # every extracted item before publishing.
+    detail = os.getenv("OPENAI_MENU_IMAGE_DETAIL", "low").strip().lower()
+    if detail not in {"low", "high", "auto"}:
+        detail = "low"
+
     payload = {
         "temperature": 0,
-        "max_tokens": 1800,
+        "max_tokens": 1200,
         "response_format": {"type": "json_object"},
         "messages": [{
             "role": "user",
             "content": [
                 {"type": "text", "text": prompt},
-                {"type": "image_url", "image_url": {"url": f"data:{content_type};base64,{image_data}", "detail": "high"}},
+                {"type": "image_url", "image_url": {"url": f"data:{content_type};base64,{image_data}", "detail": detail}},
             ],
         }],
     }
 
     response = await _extract_with_model(payload, api_key, primary_model)
 
-    # A model-specific 429 can occur even when the key/project is otherwise valid.
-    # Give a smaller vision model one bounded fallback attempt after the primary
-    # model's retries. This keeps imports usable under bursty/token-specific limits.
     if response.status_code == 429:
         try:
             error = response.json().get("error", {})
@@ -91,10 +95,7 @@ async def extract_menu_from_image(content: bytes, content_type: str) -> tuple[li
         except (ValueError, TypeError):
             code = None
         if code != "insufficient_quota" and fallback_model and fallback_model != primary_model:
-            fallback_payload = {
-                **payload,
-                "max_tokens": 1200,
-            }
+            fallback_payload = {**payload, "max_tokens": 900}
             response = await _extract_with_model(fallback_payload, api_key, fallback_model)
 
     if response.status_code >= 400:
@@ -109,7 +110,7 @@ async def extract_menu_from_image(content: bytes, content_type: str) -> tuple[li
         if response.status_code == 429 and code == "insufficient_quota":
             raise MenuImportError("OpenAI API quota is exhausted. Add API credits/billing to the OpenAI project used by OPENAI_API_KEY, then try again.")
         if response.status_code == 429:
-            raise MenuImportError("OpenAI is temporarily rate-limiting menu extraction. SpiceOS retried and also tried its fallback vision model. Please wait a little and try again.")
+            raise MenuImportError("OpenAI is temporarily rate-limiting menu extraction. The request was reduced to low-detail vision to minimize token usage. Please try again shortly.")
         if message:
             raise MenuImportError(f"OpenAI menu extraction failed: {message}")
         raise MenuImportError(f"AI menu extraction failed ({response.status_code}).")
