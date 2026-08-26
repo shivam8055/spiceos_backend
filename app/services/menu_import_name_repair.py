@@ -38,11 +38,9 @@ _OCR_ALIASES = {
     "chichen": "chicken",
     "chiken": "chicken",
     "chickn": "chicken",
-    "chiken": "chicken",
     "tika": "tikka",
     "tikaa": "tikka",
     "tha": "tikka",
-    "tika": "tikka",
     "pineaapple": "pineapple",
     "poeapple": "pineapple",
     "mosamb": "mosambi",
@@ -297,7 +295,6 @@ def _is_spice_box_image(content: bytes) -> bool:
         top = image.crop((0, 0, w, max(1, int(h * 0.30))))
         text = pytesseract.image_to_string(top, config="--psm 11")
         normalized = re.sub(r"[^a-z0-9]+", " ", text.casefold())
-        # The phone number is a stronger anchor than the decorative logo OCR.
         digits = re.sub(r"\D", "", text)
         has_brand = "spice box" in normalized or ("spice" in normalized and "box" in normalized)
         has_phone = "9661218183" in digits or "966121818" in digits
@@ -334,8 +331,6 @@ def _split_merged_line(item: ImportedMenuItem) -> list[ImportedMenuItem]:
     used_tokens: set[str] = set()
     for score, cat, canonical_name, price in ranked:
         ctokens = set(_tokens(canonical_name))
-        # Do not emit overlapping alternatives (e.g. Veg Fried Rice and
-        # Chicken Fried Rice from the same weak fragment).
         overlap = len(ctokens & used_tokens) / max(1, len(ctokens))
         if overlap > 0.5:
             continue
@@ -361,9 +356,9 @@ def _split_merged_line(item: ImportedMenuItem) -> list[ImportedMenuItem]:
 def repair_spice_box_items(items: list[ImportedMenuItem]) -> list[ImportedMenuItem]:
     repaired: list[ImportedMenuItem] = []
     seen: set[tuple[str, float, str]] = set()
+    rejected = 0
 
     for item in items:
-        # First try to split a line that clearly contains multiple menu rows.
         fragments = _split_merged_line(item)
         if fragments:
             for fragment in fragments:
@@ -374,20 +369,27 @@ def repair_spice_box_items(items: list[ImportedMenuItem]) -> list[ImportedMenuIt
             continue
 
         ranked = _catalog_candidates(item.name, item.price, item.category)
+        if not ranked:
+            rejected += 1
+            continue
+
         best_score, best_cat, best_name, best_price = ranked[0]
-        # Strong fuzzy match or exact price+reasonable name match gets the
-        # canonical spelling and canonical price. Otherwise keep the OCR item
-        # rather than hallucinating a dish.
-        if best_score >= 0.79 or (best_score >= 0.66 and abs(float(item.price) - best_price) < 0.01):
-            category = best_cat
-            name = best_name
-            price = best_price
-        else:
-            category = item.category.strip() if item.category else "Imported Menu"
-            name = repair_menu_name(item.name)
-            price = item.price
+        # For a positively identified Spice Box menu, an unmatched OCR line is
+        # NEVER allowed to pass through as a free-form menu item. This is the
+        # critical safety gate that removes QR/footer garbage such as "tag" or
+        # "di raita" with fabricated prices.
+        strong_match = best_score >= 0.79
+        price_confirmed_match = best_score >= 0.66 and abs(float(item.price) - best_price) < 0.01
+        if not (strong_match or price_confirmed_match):
+            rejected += 1
+            continue
+
+        category = best_cat
+        name = best_name
+        price = best_price
 
         if len(re.sub(r"[^A-Za-z]", "", name)) < 2:
+            rejected += 1
             continue
         key = (_norm(name), float(price), _norm(category))
         if key in seen:
@@ -445,10 +447,16 @@ def repair_local_ocr(original_extractor):
     def wrapped(content: bytes):
         items, warnings = original_extractor(content)
         if _known_menu(content):
+            before = len(items)
             repaired = repair_spice_box_items(items)
+            rejected = max(0, before - len(repaired))
             warnings = list(warnings) + [
-                "Spice Box menu catalog matching applied: OCR variants were mapped to the detected menu's canonical item names and prices."
+                "Spice Box menu catalog matching applied: OCR variants were mapped only to canonical item names and prices. Unmatched OCR lines were discarded."
             ]
+            if rejected:
+                warnings.append(
+                    f"{rejected} low-confidence OCR entries were discarded because they did not match the detected Spice Box catalog."
+                )
         else:
             repaired = repair_menu_items(items)
             if repaired and len(repaired) != len(items):
