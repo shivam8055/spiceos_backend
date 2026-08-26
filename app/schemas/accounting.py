@@ -91,3 +91,30 @@ class GSTSummary(BaseModel):
     total_sales: float
     total_purchases: float
     total_expenses: float
+
+
+class GSTProfileBase(BaseModel):
+    legal_name: str = Field(default="", max_length=255)
+    trade_name: str = Field(default="", max_length=255)
+    gstin: str | None = Field(default=None, max_length=15)
+    pan: str | None = Field(default=None, max_length=10)
+    business_type: str = Field(default="Proprietorship", max_length=50)
+    state: str = Field(default="Bihar", max_length=100)
+    state_code: str = Field(default="10", max_length=2)
+    address: str | None = None
+    pincode: str | None = Field(default=None, max_length=6)
+    phone: str | None = Field(default=None, max_length=20)
+    email: str | None = Field(default=None, max_length=255)
+    filing_frequency: str = Field(default="Monthly", max_length=30)
+    composition_scheme: bool = False
+
+
+class GSTProfileUpdate(GSTProfileBase):
+    pass
+
+
+class GSTProfileResponse(GSTProfileBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    restaurant_id: str
+    updated_at: datetime
