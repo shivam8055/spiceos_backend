@@ -27,6 +27,7 @@ def _require_restaurant_id(current_user: User) -> str:
 
 
 @router.get("", response_model=list[InventoryItemResponse])
+@router.get("/", response_model=list[InventoryItemResponse], include_in_schema=False)
 def get_inventory(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_staff),
@@ -62,6 +63,7 @@ def get_low_stock(
 
 
 @router.post("", response_model=InventoryItemResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/", response_model=InventoryItemResponse, status_code=status.HTTP_201_CREATED, include_in_schema=False)
 def create_inventory_item(
     payload: InventoryItemCreate,
     db: Session = Depends(get_db),
