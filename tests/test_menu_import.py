@@ -1,4 +1,9 @@
-from app.services.menu_import import _clean_ocr_line, _looks_like_category, _parse_price_line
+from app.services.menu_import import (
+    _clean_ocr_line,
+    _looks_like_category,
+    _ocr_language,
+    _parse_price_line,
+)
 
 
 def test_parse_common_indian_menu_price():
@@ -20,3 +25,15 @@ def test_category_detection():
 
 def test_ocr_line_cleanup():
     assert _clean_ocr_line("  •  Paneer Tikka  ₹249  ") == "Paneer Tikka ₹249"
+
+
+def test_ocr_language_uses_hindi_when_available(monkeypatch):
+    monkeypatch.setattr("app.services.menu_import.shutil.which", lambda _: "/usr/bin/tesseract")
+    monkeypatch.setattr("app.services.menu_import.pytesseract.get_languages", lambda config="": ["eng", "hin"])
+    assert _ocr_language() == "eng+hin"
+
+
+def test_ocr_language_falls_back_to_english(monkeypatch):
+    monkeypatch.setattr("app.services.menu_import.shutil.which", lambda _: "/usr/bin/tesseract")
+    monkeypatch.setattr("app.services.menu_import.pytesseract.get_languages", lambda config="": ["eng"])
+    assert _ocr_language() == "eng"
