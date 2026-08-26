@@ -43,6 +43,11 @@ RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
 RAZORPAY_WEBHOOK_SECRET = os.getenv("RAZORPAY_WEBHOOK_SECRET")
 
+# AI menu import configuration. The secret is supplied only through the
+# deployment environment; never commit an API key to source control.
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_MENU_MODEL = os.getenv("OPENAI_MENU_MODEL", "gpt-4.1-mini")
+
 # Third-party delivery provider credentials are intentionally optional.
 # Provider adapters remain disabled until official credentials/access are supplied.
 UBER_DIRECT_CLIENT_ID = os.getenv("UBER_DIRECT_CLIENT_ID")
