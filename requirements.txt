@@ -13,5 +13,4 @@ requests==2.34.2
 SQLAlchemy==2.0.51
 pytest==8.4.2
 uvicorn==0.52.0
-greenlet==3.5.4
 pytesseract==0.3.13
