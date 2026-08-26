@@ -51,6 +51,10 @@ class PurchaseInvoiceResponse(PurchaseInvoiceCreate):
     created_by_user_id: int
 
 
+class PurchaseInvoicePaymentUpdate(BaseModel):
+    payment_status: str = Field(pattern="^(unpaid|paid|partial)$")
+
+
 class ExpenseCreate(BaseModel):
     expense_date: datetime | None = None
     category: str = Field(min_length=1, max_length=100)
