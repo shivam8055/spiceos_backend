@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.accounting import router as accounting_router
 from app.api.v1.auth import router as auth_router
+from app.api.v1.customers import router as customers_router
 from app.api.v1.delivery import router as delivery_router
 from app.api.v1.delivery_webhooks import router as delivery_webhooks_router
 from app.api.v1.inventory import router as inventory_router
@@ -29,13 +30,11 @@ migrate_accounting_schema(engine)
 
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
 app.include_router(users_router)
-
-# Keep collection paths aligned with the production Flutter web client.
 app.include_router(orders_router, prefix="/orders")
 app.include_router(inventory_router, prefix="/inventory")
-
 app.include_router(accounting_router)
 app.include_router(reports_router)
+app.include_router(customers_router)
 app.include_router(qr_router)
 # Keep the legacy /qr/* namespace working while the canonical API remains
 # /public/* and /admin/*.
@@ -51,4 +50,5 @@ def health():
         "service": "spiceos_backend",
         "accounting": True,
         "reports": True,
+        "customers": True,
     }
