@@ -126,12 +126,12 @@ async def extract_menu_from_image(content: bytes, content_type: str) -> tuple[li
 
     prepared_content, prepared_type = _prepare_menu_image(content, content_type)
     configured_primary = os.getenv("OPENAI_MENU_MODEL", "gpt-4o-mini").strip()
-    configured_fallback = os.getenv("OPENAI_MENU_FALLBACK_MODEL", "gpt-4o-mini").strip()
+    configured_fallback = os.getenv("OPENAI_MENU_FALLBACK_MODEL", "gpt-4.1-mini").strip()
 
-    # Prefer the configured model, but never burn the user's rate limit by
-    # trying several models repeatedly. One primary request + one fallback.
+    # gpt-4o-mini is deliberately first: it is a compact vision-capable model
+    # and avoids repeatedly hammering a more heavily rate-limited primary model.
     models: list[str] = []
-    for model in (configured_primary, configured_fallback, "gpt-4o-mini", "gpt-4.1-mini"):
+    for model in ("gpt-4o-mini", configured_primary, configured_fallback, "gpt-4.1-mini"):
         if model and model not in models:
             models.append(model)
 
@@ -178,8 +178,8 @@ async def extract_menu_from_image(content: bytes, content_type: str) -> tuple[li
             break
         if last_code == "insufficient_quota":
             break
-        # If the primary is rate-limited, use the fallback once. The fallback
-        # is deliberately not retried again, avoiding a rate-limit storm.
+        # If the first model is rate-limited, use the fallback once. The
+        # fallback is deliberately not retried again, avoiding a rate-limit storm.
         if index == 0 and len(models) > 1:
             continue
 
