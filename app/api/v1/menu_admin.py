@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import require_staff
@@ -23,17 +23,22 @@ def _current_restaurant(current_user: User, db: Session) -> str:
 @router.delete("/admin/menu-items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_menu_item(
     item_id: int,
+    branch_id: str = Query(..., min_length=1),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_staff),
 ):
     restaurant_id = _current_restaurant(current_user, db)
     item = (
         db.query(MenuItem)
-        .filter(MenuItem.id == item_id, MenuItem.restaurant_id == restaurant_id)
+        .filter(
+            MenuItem.id == item_id,
+            MenuItem.restaurant_id == restaurant_id,
+            MenuItem.branch_id == branch_id.strip(),
+        )
         .first()
     )
     if item is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Menu item not found.")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Menu item not found for this branch.")
     db.delete(item)
     db.commit()
     return None
