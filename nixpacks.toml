@@ -1,2 +1,5 @@
+[variables]
+NIXPACKS_PYTHON_VERSION = "3.13"
+
 [phases.setup]
 aptPkgs = ["tesseract-ocr", "tesseract-ocr-eng", "tesseract-ocr-hin"]
