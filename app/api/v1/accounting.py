@@ -1,4 +1,3 @@
-from calendar import monthrange
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -8,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.api.dependencies import require_manager, require_staff
 from app.core.database import get_db
 from app.models.accounting import Expense, PurchaseInvoice, SalesInvoice
+from app.models.order import Order
 from app.models.user import User
 from app.schemas.accounting import (
     ExpenseCreate,
@@ -41,6 +41,14 @@ def _next_invoice_number(db: Session, restaurant_id: str, when: datetime) -> str
 def create_sales_invoice(payload: SalesInvoiceCreate, db: Session = Depends(get_db), user: User = Depends(require_staff)):
     restaurant_id = _restaurant_id(user)
     when = payload.invoice_date or datetime.utcnow()
+    if payload.order_id is not None:
+        order = db.query(Order).filter(Order.id == payload.order_id, Order.restaurant_id == restaurant_id).first()
+        if order is None:
+            raise HTTPException(status_code=404, detail="Order not found for this restaurant.")
+        existing = db.query(SalesInvoice).filter(SalesInvoice.restaurant_id == restaurant_id, SalesInvoice.order_id == payload.order_id).first()
+        if existing:
+            return existing
+
     invoice = SalesInvoice(
         restaurant_id=restaurant_id,
         invoice_number=_next_invoice_number(db, restaurant_id, when),
@@ -58,6 +66,38 @@ def create_sales_invoice(payload: SalesInvoiceCreate, db: Session = Depends(get_
         payment_status=payload.payment_status,
         status="issued",
         notes=payload.notes,
+        created_by_user_id=user.id,
+    )
+    db.add(invoice)
+    db.commit()
+    db.refresh(invoice)
+    return invoice
+
+
+@router.post("/sales-invoices/from-order/{order_id}", response_model=SalesInvoiceResponse, status_code=status.HTTP_201_CREATED)
+def create_invoice_from_order(order_id: int, db: Session = Depends(get_db), user: User = Depends(require_staff)):
+    restaurant_id = _restaurant_id(user)
+    order = db.query(Order).filter(Order.id == order_id, Order.restaurant_id == restaurant_id).first()
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found.")
+    existing = db.query(SalesInvoice).filter(SalesInvoice.restaurant_id == restaurant_id, SalesInvoice.order_id == order.id).first()
+    if existing:
+        return existing
+    total = float(order.total or 0)
+    if total <= 0:
+        raise HTTPException(status_code=422, detail="Order total must be greater than zero before invoicing.")
+    invoice = SalesInvoice(
+        restaurant_id=restaurant_id,
+        invoice_number=_next_invoice_number(db, restaurant_id, datetime.utcnow()),
+        order_id=order.id,
+        customer_name=order.customer_name or "Walk-in Customer",
+        customer_phone=order.customer_phone,
+        invoice_date=order.created_at or datetime.utcnow(),
+        subtotal=total,
+        total=total,
+        payment_status=order.payment_status or "pending",
+        status="issued",
+        notes=f"Generated from SpiceOS order {order.order_number}",
         created_by_user_id=user.id,
     )
     db.add(invoice)
@@ -155,10 +195,7 @@ def gst_summary(
     now = datetime.utcnow()
     year = year or now.year
     month = month or now.month
-    if month == 12:
-        end = datetime(year + 1, 1, 1)
-    else:
-        end = datetime(year, month + 1, 1)
+    end = datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)
     start = datetime(year, month, 1)
     rid = _restaurant_id(user)
 
