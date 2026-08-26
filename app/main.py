@@ -10,6 +10,7 @@ from app.api.v1.inventory import router as inventory_router
 from app.api.v1.menu_admin import router as menu_admin_router
 from app.api.v1.orders import router as orders_router
 from app.api.v1.qr_ordering import router as qr_router
+from app.api.v1 import qr_ordering as _qr_ordering
 from app.api.v1.reports import router as reports_router
 from app.api.v1.users import router as users_router
 from app.core.accounting_migration import migrate_accounting_schema
@@ -22,9 +23,12 @@ from app.core.delivery_migration import migrate_delivery_schema
 # layer so OCR noise such as "EE R/ Paneer Tikka" and "Chichen Tha" does not
 # reach the review/publish screen. The wrapper keeps the existing API unchanged.
 from app.services import menu_import as _menu_import
+from app.services.menu_enrichment import enrich_extractor
 from app.services.menu_import_name_repair import repair_local_ocr
 
 _menu_import._local_ocr_extract = repair_local_ocr(_menu_import._local_ocr_extract)
+# Apply the same category normalization to both the local OCR and OpenAI paths.
+_qr_ordering.extract_menu_from_image = enrich_extractor(_qr_ordering.extract_menu_from_image)
 
 app = FastAPI(title="SpiceOS Backend")
 app.add_middleware(
