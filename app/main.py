@@ -13,14 +13,13 @@ from app.api.v1.qr_ordering import router as qr_router
 from app.api.v1 import qr_ordering as _qr_ordering
 from app.api.v1.reports import router as reports_router
 from app.api.v1.users import router as users_router
+from app.api.v1.whatsapp_webhooks import router as whatsapp_router
 from app.core.accounting_migration import migrate_accounting_schema
 from app.core.config import CORS_ALLOWED_ORIGINS
 from app.core.database import engine
 from app.core.delivery_migration import migrate_delivery_schema
+from app.core.schema_migrations import ensure_qr_ordering_schema
 
-# Menu import fallbacks: repair OCR names, recover table-style momo variants,
-# and normalize categories so both admin import and public QR ordering receive
-# clean, structured menu data.
 from app.services import menu_import as _menu_import
 from app.services.menu_enrichment import enrich_extractor
 from app.services.menu_import_name_repair import repair_local_ocr
@@ -42,6 +41,7 @@ app.add_middleware(
 
 migrate_delivery_schema(engine)
 migrate_accounting_schema(engine)
+ensure_qr_ordering_schema(engine)
 
 app.include_router(auth_router, prefix="/auth", tags=["auth"])
 app.include_router(users_router)
@@ -52,11 +52,10 @@ app.include_router(reports_router)
 app.include_router(customers_router)
 app.include_router(qr_router)
 app.include_router(menu_admin_router)
-# Keep the legacy /qr/* namespace working while the canonical API remains
-# /public/* and /admin/*.
 app.include_router(qr_router, prefix="/qr")
 app.include_router(delivery_router)
 app.include_router(delivery_webhooks_router)
+app.include_router(whatsapp_router)
 
 
 @app.get("/health")
@@ -67,4 +66,5 @@ def health():
         "accounting": True,
         "reports": True,
         "customers": True,
+        "whatsapp_ordering": True,
     }
