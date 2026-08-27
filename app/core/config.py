@@ -2,7 +2,6 @@ import os
 
 from dotenv import load_dotenv
 
-
 load_dotenv()
 
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -12,8 +11,7 @@ FIREBASE_SERVICE_ACCOUNT_JSON = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
 def _cors_origins() -> list[str]:
     configured = os.getenv("CORS_ALLOWED_ORIGINS", "")
     origins = [origin.strip().rstrip("/") for origin in configured.split(",") if origin.strip()]
-    required = ["https://app.spiceos.co.in"]
-    return list(dict.fromkeys([*origins, *required]))
+    return list(dict.fromkeys([*origins, "https://app.spiceos.co.in"]))
 
 
 CORS_ALLOWED_ORIGINS = _cors_origins()
@@ -41,7 +39,8 @@ WHATSAPP_APP_SECRET = os.getenv("WHATSAPP_APP_SECRET")
 WHATSAPP_GRAPH_VERSION = os.getenv("WHATSAPP_GRAPH_VERSION", "v23.0")
 WHATSAPP_RESTAURANT_ID = os.getenv("WHATSAPP_RESTAURANT_ID")
 WHATSAPP_DEFAULT_BRANCH_ID = os.getenv("WHATSAPP_DEFAULT_BRANCH_ID", "main")
-WHATSAPP_BUSINESS_NUMBER = os.getenv("WHATSAPP_BUSINESS_NUMBER", "9661218183")
+# The menu displays 9661218183; WhatsApp click-to-chat requires the country code.
+WHATSAPP_BUSINESS_NUMBER = os.getenv("WHATSAPP_BUSINESS_NUMBER", "919661218183")
 
 UBER_DIRECT_CLIENT_ID = os.getenv("UBER_DIRECT_CLIENT_ID")
 UBER_DIRECT_CLIENT_SECRET = os.getenv("UBER_DIRECT_CLIENT_SECRET")
