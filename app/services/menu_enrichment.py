@@ -8,18 +8,10 @@ def _momo_category(name: str) -> str | None:
     value = name.casefold().replace("–", "-").replace("—", "-")
     if "momo" not in value:
         return None
-    if "steamed" in value:
-        style = "STEAMED"
-    elif "chilli" in value or "chili" in value:
-        style = "CHILLI"
-    elif "kurkure" in value or "fried" in value:
-        style = "KURKURE"
-    elif "afghani" in value:
-        style = "AFGHANI"
-    else:
-        style = "OTHER"
-    food = "NON-VEG" if any(word in value for word in ("chicken", "mutton", "fish", "prawn", "egg")) else "VEG"
-    return f"MOMOS / {style} / {food}"
+    # Keep all momo variants under one parent category. Preparation style and
+    # Veg/Non-Veg remain in the item name so the import review screen shows the
+    # complete momo section instead of scattering it into one-item categories.
+    return "MOMOS"
 
 
 def enrich_items(items: list[ImportedMenuItem]) -> list[ImportedMenuItem]:
@@ -34,7 +26,7 @@ def enrich_extractor(original: Callable[..., Awaitable[tuple[list[ImportedMenuIt
     async def wrapped(*args: Any, **kwargs: Any):
         items, warnings = await original(*args, **kwargs)
         return enrich_items(items), list(warnings) + [
-            "Menu categories normalized: Momo variants are separated by preparation style and Veg/Non-Veg so they can be filtered and ordered easily."
+            "Menu categories normalized: all Momo variants are grouped under MOMOS while preparation style and Veg/Non-Veg remain visible in item names."
         ]
 
     return wrapped
