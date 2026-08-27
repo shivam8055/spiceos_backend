@@ -10,27 +10,14 @@ FIREBASE_SERVICE_ACCOUNT_JSON = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
 
 
 def _cors_origins() -> list[str]:
-    """Return normalized browser origins allowed to call the API.
-
-    Railway environment variables are easy to accidentally configure with a
-    trailing slash. Browsers send the origin without that slash, so normalize
-    it here. The production SpiceOS app origin is also always retained so a
-    bad/partial Railway override cannot silently break the deployed web app.
-    """
     configured = os.getenv("CORS_ALLOWED_ORIGINS", "")
-    origins = [
-        origin.strip().rstrip("/")
-        for origin in configured.split(",")
-        if origin.strip()
-    ]
+    origins = [origin.strip().rstrip("/") for origin in configured.split(",") if origin.strip()]
     required = ["https://app.spiceos.co.in"]
     return list(dict.fromkeys([*origins, *required]))
 
 
 CORS_ALLOWED_ORIGINS = _cors_origins()
-
 PUBLIC_QR_BASE_URL = os.getenv("PUBLIC_QR_BASE_URL", "https://app.spiceos.co.in/#/order")
-
 ENVIRONMENT = os.getenv("ENVIRONMENT", "development").strip().lower()
 IS_PRODUCTION = ENVIRONMENT in {"production", "prod"} or bool(os.getenv("RAILWAY_PROJECT_ID"))
 QR_PUBLIC_TOKEN_SECRET = os.getenv("QR_PUBLIC_TOKEN_SECRET")
@@ -43,13 +30,19 @@ RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID")
 RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET")
 RAZORPAY_WEBHOOK_SECRET = os.getenv("RAZORPAY_WEBHOOK_SECRET")
 
-# AI menu import configuration. The secret is supplied only through the
-# deployment environment; never commit an API key to source control.
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MENU_MODEL = os.getenv("OPENAI_MENU_MODEL", "gpt-4.1-mini")
 
-# Third-party delivery provider credentials are intentionally optional.
-# Provider adapters remain disabled until official credentials/access are supplied.
+# WhatsApp Cloud API. Credentials stay in Railway environment variables.
+WHATSAPP_ACCESS_TOKEN = os.getenv("WHATSAPP_ACCESS_TOKEN")
+WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID")
+WHATSAPP_VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN", "spiceos-whatsapp-verify")
+WHATSAPP_APP_SECRET = os.getenv("WHATSAPP_APP_SECRET")
+WHATSAPP_GRAPH_VERSION = os.getenv("WHATSAPP_GRAPH_VERSION", "v23.0")
+WHATSAPP_RESTAURANT_ID = os.getenv("WHATSAPP_RESTAURANT_ID")
+WHATSAPP_DEFAULT_BRANCH_ID = os.getenv("WHATSAPP_DEFAULT_BRANCH_ID", "main")
+WHATSAPP_BUSINESS_NUMBER = os.getenv("WHATSAPP_BUSINESS_NUMBER", "9661218183")
+
 UBER_DIRECT_CLIENT_ID = os.getenv("UBER_DIRECT_CLIENT_ID")
 UBER_DIRECT_CLIENT_SECRET = os.getenv("UBER_DIRECT_CLIENT_SECRET")
 UBER_DIRECT_CUSTOMER_ID = os.getenv("UBER_DIRECT_CUSTOMER_ID")
