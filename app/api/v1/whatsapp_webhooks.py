@@ -5,9 +5,11 @@ import json
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from app.core.config import WHATSAPP_APP_SECRET
+from app.api.dependencies import require_staff
+from app.core.config import WHATSAPP_APP_SECRET, WHATSAPP_BUSINESS_NUMBER
 from app.core.database import get_db
-from app.services.whatsapp_ordering import handle_incoming_message, send_whatsapp_text, verify_webhook_token
+from app.models.user import User
+from app.services.whatsapp_ordering import handle_incoming_message, send_whatsapp_text, verify_webhook_token, whatsapp_qr_url
 
 router = APIRouter(prefix="/webhooks/whatsapp", tags=["whatsapp"])
 
@@ -30,11 +32,7 @@ async def verify_whatsapp_webhook(request: Request):
 
 
 @router.post("")
-async def receive_whatsapp_webhook(
-    request: Request,
-    db: Session = Depends(get_db),
-    x_hub_signature_256: str | None = Header(default=None, alias="X-Hub-Signature-256"),
-):
+async def receive_whatsapp_webhook(request: Request, db: Session = Depends(get_db), x_hub_signature_256: str | None = Header(default=None, alias="X-Hub-Signature-256")):
     raw_body = await request.body()
     if not _verify_signature(raw_body, x_hub_signature_256):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid WhatsApp webhook signature")
@@ -42,19 +40,15 @@ async def receive_whatsapp_webhook(
         payload = json.loads(raw_body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON") from exc
-
     for entry in payload.get("entry", []):
         for change in entry.get("changes", []):
             value = change.get("value", {})
             contacts = value.get("contacts", [])
-            profile_name = None
-            if contacts:
-                profile_name = (contacts[0].get("profile") or {}).get("name")
+            profile_name = (contacts[0].get("profile") or {}).get("name") if contacts else None
             for message in value.get("messages", []):
                 if message.get("type") != "text":
                     continue
-                wa_id = message.get("from")
-                message_id = message.get("id")
+                wa_id, message_id = message.get("from"), message.get("id")
                 text = ((message.get("text") or {}).get("body") or "").strip()
                 if not wa_id or not message_id or not text:
                     continue
@@ -62,3 +56,8 @@ async def receive_whatsapp_webhook(
                 if reply:
                     await send_whatsapp_text(wa_id, reply)
     return {"ok": True}
+
+
+@router.get("/admin/qr-link")
+def get_whatsapp_qr_link(qr_token: str | None = None, restaurant_id: str | None = None, branch_id: str | None = None, current_user: User = Depends(require_staff)):
+    return {"phone": WHATSAPP_BUSINESS_NUMBER, "url": whatsapp_qr_url(WHATSAPP_BUSINESS_NUMBER, qr_token=qr_token, restaurant_id=restaurant_id, branch_id=branch_id)}
