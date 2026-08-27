@@ -22,7 +22,7 @@ from app.core.schema_migrations import ensure_qr_ordering_schema
 
 from app.services import menu_import as _menu_import
 from app.services.menu_enrichment import enrich_extractor
-from app.services.menu_import_name_repair import repair_local_ocr
+from app.services.menu_import_name_repair_safe import repair_local_ocr
 from app.services.menu_momo_table import augment_local_ocr
 
 _menu_import._local_ocr_extract = repair_local_ocr(_menu_import._local_ocr_extract)
