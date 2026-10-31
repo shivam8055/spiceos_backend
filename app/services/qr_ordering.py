@@ -175,6 +175,16 @@ def create_qr_order(db: Session, table: QRTable, payload: QROrderCreateRequest, 
         calculated_total += line_total
         snapshots.append({"item": item, "quantity": line.quantity, "unit_price": unit_price, "line_total": line_total, "modifiers": selected_modifiers, "note": line.note})
 
+    if payload.fulfillment_type == "delivery":
+        address = payload.delivery_address or {}
+        required = ("address_line", "city", "postal_code")
+        if any(not str(address.get(field, "")).strip() for field in required):
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="A complete delivery address is required.")
+        if not str(address.get("postal_code", "")).strip().isdigit() or len(str(address.get("postal_code", "")).strip()) != 6:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Enter a valid 6-digit PIN code.")
+        if not payload.customer_phone or not payload.customer_phone.strip().isdigit() or len(payload.customer_phone.strip()) != 10:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="A valid 10-digit customer phone number is required for delivery.")
+
     public_token = public_order_token(table, key)
     order = Order(
         order_number=f"QR-{uuid4().hex[:12].upper()}",
@@ -182,6 +192,8 @@ def create_qr_order(db: Session, table: QRTable, payload: QROrderCreateRequest, 
         customer_id=None,
         customer_name=(payload.customer_name or "QR Guest").strip() or "QR Guest",
         customer_phone=payload.customer_phone or None,
+        fulfillment_type=payload.fulfillment_type,
+        delivery_address_json=json.dumps(payload.delivery_address, separators=(",", ":")) if payload.delivery_address else None,
         primary_item=snapshots[0]["item"].name,
         total=round(calculated_total, 2),
         status="created",
