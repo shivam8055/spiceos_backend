@@ -14,6 +14,8 @@ class Order(Base):
     customer_id = Column(String, nullable=True, index=True)
     customer_name = Column(String, nullable=False)
     customer_phone = Column(String, nullable=True)
+    fulfillment_type = Column(String, nullable=True, default="pickup")
+    delivery_address_json = Column(String, nullable=True)
     primary_item = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=True, default=datetime.utcnow, index=True)
     preparing_at = Column(DateTime, nullable=True, index=True)
