@@ -23,6 +23,16 @@ class OrderUpdate(BaseModel):
     order_source: str | None = None
 
 
+class OrderItemResponse(BaseModel):
+    id: int
+    item_name: str
+    quantity: int
+    unit_price: float
+    line_total: float
+    modifiers_json: str = "[]"
+    note: str | None = None
+
+
 class OrderResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -41,3 +51,4 @@ class OrderResponse(BaseModel):
     total: float
     order_source: str
     transaction_code: str | None = None
+    items: list[OrderItemResponse] = Field(default_factory=list)
