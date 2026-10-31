@@ -3,9 +3,10 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.api.v1.orders import create_order, update_order
+from app.api.v1.orders import create_order, get_orders, update_order
 from app.core.database import Base
 from app.models.order import Order
+from app.models.order_item import OrderItem
 from app.models.restaurant import Restaurant
 from app.models.user import User
 from app.schemas.order import OrderCreate, OrderUpdate
@@ -226,3 +227,51 @@ def test_full_status_timeline_records_each_transition_once():
     assert delivered.out_for_delivery_at == out_at
     assert delivered.delivered_at is not None
     assert delivered.preparing_at <= delivered.ready_at <= delivered.out_for_delivery_at <= delivered.delivered_at
+
+
+
+def test_order_response_includes_all_line_items_and_quantities():
+    db, _, _, staff = seed()
+    order = Order(
+        order_number="QR-ITEMS-1",
+        restaurant_id="restaurant-a",
+        customer_name="QR Guest",
+        primary_item="Chocolate Shake",
+        total=654,
+        status="preparing",
+        payment_status="paid",
+        order_source="qr_table",
+    )
+    db.add(order)
+    db.flush()
+    db.add_all(
+        [
+            OrderItem(
+                order_id=order.id,
+                menu_item_id=101,
+                item_name="Chocolate Shake",
+                quantity=2,
+                unit_price=327,
+                modifiers_json="[]",
+                line_total=654,
+            ),
+            OrderItem(
+                order_id=order.id,
+                menu_item_id=102,
+                item_name="Paneer Tikka",
+                quantity=1,
+                unit_price=199,
+                modifiers_json="[]",
+                line_total=199,
+            ),
+        ]
+    )
+    db.commit()
+
+    responses = get_orders(db=db, current_user=staff)
+    response = next(item for item in responses if item.order_number == "QR-ITEMS-1")
+
+    assert [(item.item_name, item.quantity, item.line_total) for item in response.items] == [
+        ("Chocolate Shake", 2, 654),
+        ("Paneer Tikka", 1, 199),
+    ]
