@@ -6,7 +6,7 @@ def ensure_order_columns(engine) -> None:
     if "orders" not in inspector.get_table_names():
         return
     existing = {column["name"] for column in inspector.get_columns("orders")}
-    additions = {"restaurant_id":"VARCHAR","customer_id":"VARCHAR","primary_item":"VARCHAR","created_at":"TIMESTAMP","preparing_at":"TIMESTAMP","ready_at":"TIMESTAMP","out_for_delivery_at":"TIMESTAMP","delivered_at":"TIMESTAMP","status":"VARCHAR","payment_status":"VARCHAR","order_source":"VARCHAR","customer_phone":"VARCHAR","qr_table_id":"INTEGER","qr_session_id":"VARCHAR","idempotency_key":"VARCHAR","public_token_hash":"VARCHAR"}
+    additions = {"restaurant_id":"VARCHAR","customer_id":"VARCHAR","primary_item":"VARCHAR","created_at":"TIMESTAMP","preparing_at":"TIMESTAMP","ready_at":"TIMESTAMP","out_for_delivery_at":"TIMESTAMP","delivered_at":"TIMESTAMP","status":"VARCHAR","payment_status":"VARCHAR","order_source":"VARCHAR","customer_phone":"VARCHAR","fulfillment_type":"VARCHAR","delivery_address_json":"TEXT","qr_table_id":"INTEGER","qr_session_id":"VARCHAR","idempotency_key":"VARCHAR","public_token_hash":"VARCHAR"}
     missing = [(name, sql_type) for name, sql_type in additions.items() if name not in existing]
     with engine.begin() as connection:
         for name, sql_type in missing:
