@@ -177,11 +177,20 @@ def create_qr_order(db: Session, table: QRTable, payload: QROrderCreateRequest, 
 
     if payload.fulfillment_type == "delivery":
         address = payload.delivery_address or {}
-        required = ("address_line", "city", "postal_code")
+        has_gps = address.get("latitude") is not None and address.get("longitude") is not None
+        required = ("address_line", "city") if has_gps else ("address_line", "city", "postal_code")
         if any(not str(address.get(field, "")).strip() for field in required):
-            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="A complete delivery address is required.")
-        if not str(address.get("postal_code", "")).strip().isdigit() or len(str(address.get("postal_code", "")).strip()) != 6:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="A complete delivery address or current GPS location is required.")
+        if not has_gps and (not str(address.get("postal_code", "")).strip().isdigit() or len(str(address.get("postal_code", "")).strip()) != 6):
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Enter a valid 6-digit PIN code.")
+        if has_gps:
+            try:
+                latitude = float(address["latitude"])
+                longitude = float(address["longitude"])
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid GPS coordinates.")
+            if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+                raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid GPS coordinates.")
         if not payload.customer_phone or not payload.customer_phone.strip().isdigit() or len(payload.customer_phone.strip()) != 10:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="A valid 10-digit customer phone number is required for delivery.")
 
