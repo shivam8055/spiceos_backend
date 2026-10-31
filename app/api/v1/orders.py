@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.api.dependencies import require_manager, require_staff
 from app.core.database import get_db
 from app.models.order import Order
+from app.models.order_item import OrderItem
 from app.models.payment import Payment
 from app.models.restaurant import Restaurant
 from app.models.user import User
@@ -64,10 +65,28 @@ def _ensure_order_defaults(order: Order) -> None:
         order.order_source = "Unknown"
 
 
-def _serialize_order(order: Order, transaction_code: str | None = None) -> OrderResponse:
+def _serialize_order(db: Session, order: Order, transaction_code: str | None = None) -> OrderResponse:
     _ensure_order_defaults(order)
     response = OrderResponse.model_validate(order)
-    return response.model_copy(update={"transaction_code": transaction_code})
+    items = (
+        db.query(OrderItem)
+        .filter(OrderItem.order_id == order.id)
+        .order_by(OrderItem.id.asc())
+        .all()
+    )
+    item_payload = [
+        {
+            "id": item.id,
+            "item_name": item.item_name,
+            "quantity": item.quantity,
+            "unit_price": float(item.unit_price),
+            "line_total": float(item.line_total),
+            "modifiers_json": item.modifiers_json or "[]",
+            "note": item.note,
+        }
+        for item in items
+    ]
+    return response.model_copy(update={"transaction_code": transaction_code, "items": item_payload})
 
 
 def _latest_transaction_codes(db: Session, order_ids: list[int]) -> dict[int, str]:
@@ -125,7 +144,7 @@ def get_orders(
     if changed:
         db.commit()
     transaction_codes = _latest_transaction_codes(db, [order.id for order in orders])
-    return [_serialize_order(order, transaction_codes.get(order.id)) for order in orders]
+    return [_serialize_order(db, order, transaction_codes.get(order.id)) for order in orders]
 
 
 @router.post("", response_model=OrderResponse, status_code=status.HTTP_201_CREATED)
@@ -157,7 +176,7 @@ def create_order(
     db.add(new_order)
     db.commit()
     db.refresh(new_order)
-    return _serialize_order(new_order, _latest_transaction_code(db, new_order.id))
+    return _serialize_order(db, new_order, _latest_transaction_code(db, new_order.id))
 
 
 @router.patch("/{order_id}", response_model=OrderResponse)
@@ -249,4 +268,4 @@ def update_order(
     _ensure_order_defaults(order)
     db.commit()
     db.refresh(order)
-    return _serialize_order(order, _latest_transaction_code(db, order.id))
+    return _serialize_order(db, order, _latest_transaction_code(db, order.id))
