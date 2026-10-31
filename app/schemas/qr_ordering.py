@@ -43,6 +43,28 @@ class QROrderCreateRequest(BaseModel):
     items: list[QROrderItemRequest] = Field(min_length=1, max_length=50)
     customer_name: str | None = Field(default=None, max_length=100)
     customer_phone: str | None = Field(default=None, max_length=20)
+    fulfillment_type: str = Field(default='pickup', pattern='^(delivery|pickup)
+
+class QROrderCreateResponse(BaseModel):
+    order_id: int
+    order_number: str
+    status: str
+    total: float
+    currency: str
+    table_name: str
+    public_order_token: str
+
+
+class QROrderStatusResponse(BaseModel):
+    order_number: str
+    status: str
+    payment_status: str
+    total: float
+    currency: str
+    table_name: str
+    created_at: str
+)
+    delivery_address: dict | None = None
 
 
 class QROrderCreateResponse(BaseModel):
